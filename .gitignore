@@ -1,0 +1,73 @@
+# ── Secrets — NEVER commit these ─────────────────────────────────────────────
+.env
+*.env
+.env.*
+!.env.example
+secrets/
+credentials/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── Database (SQLite — contains trade history) ────────────────────────────────
+db/*.db
+db/*.db-shm
+db/*.db-wal
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/*.log
+logs/*.log.*
+*.log
+
+# ── Reports (generated daily — pushed separately) ─────────────────────────────
+# Uncomment below to stop pushing reports to GitHub
+# reports/report_*.html
+# reports/report_*.json
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Jupyter / IPython ─────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Node (for Cloudflare Wrangler) ───────────────────────────────────────────
+node_modules/
+.wrangler/
+cloudflare/.dev.vars
+
+# ── Backtest outputs ─────────────────────────────────────────────────────────
+backtest/results/
+backtest/*.csv
+
+# ── Temporary files ───────────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.orig
+.cache/
