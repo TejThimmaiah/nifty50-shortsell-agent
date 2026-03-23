@@ -14,7 +14,6 @@ yfinance>=0.2.40
 pandas>=2.1.0
 numpy>=1.26.0
 ta>=0.11.0
-git+https://github.com/twopirllc/pandas-ta.git@development
 
 # ── Web Scraping & HTTP ───────────────────────────────────────────────────────
 requests>=2.31.0
