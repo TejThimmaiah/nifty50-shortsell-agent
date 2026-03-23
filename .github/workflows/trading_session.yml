@@ -86,9 +86,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -q
 
+      - name: Install Chrome for Kite login
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq google-chrome-stable || \
+          sudo apt-get install -y -qq chromium-browser || true
+          pip install selenium webdriver-manager -q
+
       - name: Refresh Kite access token
         run: python kite_login.py
-        continue-on-error: true   # Don't block if TOTP fails — agent handles manually
+        continue-on-error: true
 
       - name: Upload fresh access token as artifact
         uses: actions/upload-artifact@v4
