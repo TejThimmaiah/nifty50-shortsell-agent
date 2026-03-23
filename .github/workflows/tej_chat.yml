@@ -1,0 +1,34 @@
+name: Tej — 24/7 Autonomous Chat
+
+on:
+  schedule:
+    - cron: "30 18 * * *"   # 12:00 AM IST
+    - cron: "30 0 * * *"    # 6:00 AM IST
+    - cron: "15 10 * * 1-5" # 3:45 PM IST (after market)
+    - cron: "30 15 * * *"   # 9:00 PM IST
+  workflow_dispatch:
+
+env:
+  GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
+  ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+  TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+  KITE_API_KEY:         ${{ secrets.KITE_API_KEY }}
+
+jobs:
+  tej_chat:
+    name: Tej 24/7 Chat
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt anthropic -q
+
+      - name: Start Tej
+        run: python tej_brain.py
