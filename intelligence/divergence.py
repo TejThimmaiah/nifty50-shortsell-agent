@@ -28,7 +28,10 @@ Multi-timeframe: divergence on 15m AND daily = extremely strong signal.
 import logging
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+import ta
+import ta.momentum
+import ta.trend
+import ta.volatility
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Tuple
 
