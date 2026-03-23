@@ -45,25 +45,31 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 def _check_env():
-    from config import KITE_API_KEY, GROQ_API_KEY, TELEGRAM_BOT_TOKEN, TRADING, PAPER_TRADE
-    issues = []
-    if not KITE_API_KEY:       issues.append("KITE_API_KEY not set")
-    if not GROQ_API_KEY:       issues.append("GROQ_API_KEY not set — Tej needs his reasoning engine")
-    if not TELEGRAM_BOT_TOKEN: issues.append("TELEGRAM_BOT_TOKEN not set — can't talk to Tej")
-    if not PAPER_TRADE and not os.getenv("KITE_ACCESS_TOKEN"):
-        issues.append("KITE_ACCESS_TOKEN not set (required for live orders)")
+    from config import KITE_API_KEY, GROQ_API_KEY, TELEGRAM_BOT_TOKEN, TRADING
+    errors   = []   # blocking — healthcheck fails
+    warnings = []   # non-blocking — just inform
+
+    if not KITE_API_KEY:        errors.append("KITE_API_KEY not set")
+    if not GROQ_API_KEY:        errors.append("GROQ_API_KEY not set — Tej needs his reasoning engine")
+    if not TELEGRAM_BOT_TOKEN:  warnings.append("TELEGRAM_BOT_TOKEN not set — can't send Telegram messages")
+
+    # KITE_ACCESS_TOKEN is generated fresh each morning by kite_login.py
+    # It won't exist at healthcheck time — that's normal and expected
+    if not os.getenv("KITE_ACCESS_TOKEN"):
+        warnings.append("KITE_ACCESS_TOKEN not set — will be generated at 8:45 AM IST by morning prep")
+
     try:
         TRADING.validate()
     except AssertionError as e:
-        issues.append(f"Config violation: {e}")
-    return issues
+        errors.append(f"Config violation: {e}")
+
+    return errors, warnings
 
 
 def run_healthcheck():
-    issues = _check_env()
+    errors, warnings = _check_env()
     from config import TRADING, PAPER_TRADE
     from brain.neural_core import brain
-    from brain.tej_persona import tej
     from data.nifty50_universe import NIFTY50
 
     print("\n" + "═" * 52)
@@ -78,13 +84,15 @@ def run_healthcheck():
     print(f"  Patterns:      {len(brain._state.discovered_patterns)} discovered")
     print(f"  Built on:      Groq Llama 3.3 70B (open-source)")
     print()
-    if issues:
-        for issue in issues:
-            print(f"  ⚠  {issue}")
+    for w in warnings:
+        print(f"  ⚠  {w}")
+    if errors:
+        for e in errors:
+            print(f"  ❌ {e}")
     else:
-        print("  ✅ All checks passed")
+        print("  ✅ All critical checks passed — Tej is ready")
     print("═" * 52 + "\n")
-    return len(issues) == 0
+    return len(errors) == 0
 
 
 def main():
