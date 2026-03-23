@@ -237,7 +237,7 @@ class MarketCharacterClassifier:
     def _compute_adx(self, df: pd.DataFrame, period: int = 14) -> float:
         """ADX — measures trend strength regardless of direction."""
         try:
-            import pandas_ta as ta
+            import ta; import ta.momentum; import ta.trend; import ta.volatility
             adx = ta.adx(df["high"], df["low"], df["close"], length=period)
             if adx is None:
                 return 20.0
