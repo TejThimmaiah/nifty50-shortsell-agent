@@ -239,7 +239,7 @@ class ATRStopEngine:
         if len(df) < 10:
             return None
         try:
-            import pandas_ta as ta
+            import ta; import ta.momentum; import ta.trend; import ta.volatility
             psar_df = ta.psar(df["high"], df["low"], df["close"])
             if psar_df is None or psar_df.empty:
                 return None
