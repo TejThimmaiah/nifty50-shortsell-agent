@@ -1,0 +1,135 @@
+name: Tej — CI / CD / Health
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "15 3 * * 1-5"   # Daily health check 8:45 AM IST
+    - cron: "30 1 * * 1"     # Weekly backtest Monday 7 AM IST
+  workflow_dispatch:
+    inputs:
+      run_backtest:
+        description: "Run backtest?"
+        default: "false"
+      backtest_days:
+        description: "Backtest days"
+        default: "60"
+
+env:
+  PAPER_TRADE: "true"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  test:
+    name: Unit + Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+      - run: pip install -r requirements.txt -q
+      - name: Unit tests
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: pytest tests/test_agent.py tests/test_new_components.py -v --tb=short --timeout=60 -m "not slow and not live and not integration"
+      - name: Integration tests
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: pytest tests/test_integration.py -v --tb=short --timeout=120 -m "not slow and not live"
+
+  health-check:
+    name: Daily Health Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt -q
+      - run: python main.py --healthcheck
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: healthcheck-log-${{ github.run_number }}
+          path: logs/
+          retention-days: 7
+
+  weekly-backtest:
+    name: Weekly Backtest
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'schedule' && github.event.schedule == '30 1 * * 1') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_backtest == 'true')
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt -q
+      - run: python -m backtest.backtester --universe priority --days ${{ github.event.inputs.backtest_days || '60' }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest-${{ github.run_number }}
+          path: reports/backtest_*.json
+          retention-days: 30
+      - uses: EndBug/add-and-commit@v9
+        with:
+          add: "reports/"
+          message: "chore: weekly backtest ${{ github.run_number }}"
+          default_author: github_actions
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to Oracle Cloud
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key:      ${{ secrets.ORACLE_SSH_KEY }}
+          port:     22
+          timeout:  60s
+          script: |
+            cd ~/finance-agent
+            git pull origin main
+            source venv/bin/activate
+            pip install -r requirements.txt -q
+            sudo systemctl restart finance-agent.service
+            sudo systemctl is-active --quiet finance-agent.service && echo "Service OK" || echo "Service FAILED"
+      - name: Notify Telegram
+        if: always()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 Deploy ${{ job.status }} — #${{ github.run_number }}" || true
+
+  deploy-cloudflare:
+    name: Deploy Cloudflare Worker
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          workingDirectory: cloudflare
+          wranglerVersion: "3"
+        continue-on-error: true
