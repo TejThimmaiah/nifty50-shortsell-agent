@@ -1,36 +1,36 @@
-# FinanceMeridian Trading Agent — Python Dependencies
+# nifty50-shortsell-agent (Tej) — Python Dependencies
 # Install with: pip install -r requirements.txt
-# Python 3.11+ required
-# Total cost for data: ₹0 (all free public APIs)
+# Python 3.11 required (GitHub Actions default)
+# Total cost for data: Rs 0 (all free public APIs)
 
 # ── ML (for ensemble predictor — free, no GPU needed) ────────────────────────
 scikit-learn>=1.4.0         # Random Forest, Gradient Boosting, Logistic Regression, Naive Bayes
 
-# ── Free NSE Market Data (replaces Zerodha WebSocket ₹500/month) ─────────────
-openchart>=0.1.5            # Intraday OHLCV from NSE (MIT license, free)
+# ── Free NSE Market Data ──────────────────────────────────────────────────────
+openchart>=0.1.5            # Intraday OHLCV from NSE (free)
 jugaad-data>=0.24           # Live quotes + historical from NSE (free)
-nsetools>=2.0.1             # Live quotes fallback (free, NSE public API)
+nsetools>=2.0.1             # Live quotes fallback (free)
 yfinance>=0.2.40            # Yahoo Finance daily OHLCV (free)
 
 # ── Technical Analysis ────────────────────────────────────────────────────────
 pandas>=2.1.0
 numpy>=1.26.0
-pandas-ta>=0.3.14b          # 130+ technical indicators
+pandas-ta==0.3.14b          # 130+ technical indicators (pinned — >=0.3.14b breaks on Python 3.11)
 
 # ── Web Scraping & HTTP ───────────────────────────────────────────────────────
 requests>=2.31.0
 beautifulsoup4>=4.12.0      # Screener.in fundamentals
 feedparser>=6.0.11          # RSS news feeds
-ddgs>=0.1    # Self-healer web search
+ddgs>=0.1                   # Self-healer web search
 
 # ── Broker: Zerodha Kite Connect Personal (FREE for order placement) ──────────
-kiteconnect>=5.0.1          # Order API only — no market data subscription needed
+kiteconnect>=5.0.1
 
 # ── TOTP for automated Kite login ─────────────────────────────────────────────
 pyotp>=2.9.0
 
 # ── GitHub API (for pushing Kite token to GitHub Secrets from GCP) ───────────
-PyNaCl>=1.5.0               # Encryption for GitHub Secrets API
+PyNaCl>=1.5.0
 
 # ── Scheduling ────────────────────────────────────────────────────────────────
 schedule>=1.2.1
