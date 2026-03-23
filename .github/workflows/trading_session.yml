@@ -72,6 +72,8 @@ jobs:
       KITE_USER_ID:           ${{ secrets.KITE_USER_ID }}
       KITE_PASSWORD:          ${{ secrets.KITE_PASSWORD }}
       KITE_TOTP_SECRET:       ${{ secrets.KITE_TOTP_SECRET }}
+      GITHUB_TOKEN:           ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPO:            ${{ github.repository }}
 
     steps:
       - uses: actions/checkout@v4
