@@ -1,19 +1,16 @@
 """
 Zerodha Kite Daily Login & Token Refresh
-Runs at 8:45 AM IST every weekday via GitHub Actions morning_prep job.
+=========================================
+Uses the enctoken approach — the most reliable headless login method.
 
-Correct login flow:
-  1. POST credentials to kite.zerodha.com/api/login
-  2. POST TOTP to kite.zerodha.com/api/twofa
-  3. GET connect/login?api_key=... → redirects to 127.0.0.1?request_token=...
-  4. Exchange request_token for access_token via KiteConnect
-  5. Store access_token as GitHub Secret for trading session
-
-The access_token is valid for the rest of the trading day.
+After /api/login + /api/twofa, Zerodha returns an enc_token.
+We set this as a cookie and use it to get the request_token
+from the connect/login redirect.
 """
 
 import os
 import sys
+import re
 import time
 import logging
 import requests
@@ -34,7 +31,7 @@ KITE_TOTP_SECRET = os.getenv("KITE_TOTP_SECRET")
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT    = os.getenv("TELEGRAM_CHAT_ID")
 GITHUB_TOKEN     = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO      = os.getenv("GITHUB_REPO")   # e.g. TejThimmaiah/nifty50-shortsell-agent
+GITHUB_REPO      = os.getenv("GITHUB_REPO")
 
 
 def notify(msg: str):
@@ -50,27 +47,43 @@ def notify(msg: str):
         pass
 
 
-def get_totp() -> str:
-    return pyotp.TOTP(KITE_TOTP_SECRET).now()
+def extract_token_from_url(url: str):
+    """Extract request_token from a URL string."""
+    if "request_token=" in url:
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        token = params.get("request_token", [None])[0]
+        if token:
+            return token
+    match = re.search(r'request_token=([A-Za-z0-9]+)', url)
+    if match:
+        return match.group(1)
+    return None
 
 
 def login() -> str:
     """
-    Full Zerodha login flow. Returns access_token.
+    Full Zerodha login. Returns access_token.
+
+    Flow:
+    1. POST /api/login → request_id
+    2. POST /api/twofa → enc_token (in response + cookies)
+    3. Use enc_token cookie to GET connect/login → redirects to 127.0.0.1?request_token=XXX
+    4. Exchange request_token for access_token
     """
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent":     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120",
+        "Accept":         "*/*",
         "X-Kite-Version": "3",
     })
 
-    # ── Step 1: Login with user_id + password ─────────────────────
+    # ── Step 1: Password Login ────────────────────────────────────
     logger.info("Step 1: Password login...")
     r1 = session.post(
         "https://kite.zerodha.com/api/login",
         data={"user_id": KITE_USER_ID, "password": KITE_PASSWORD},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=20,
     )
     r1.raise_for_status()
@@ -80,10 +93,11 @@ def login() -> str:
     request_id = d1["data"]["request_id"]
     logger.info(f"Step 1 OK — request_id: {request_id}")
 
-    # ── Step 2: TOTP verification ──────────────────────────────────
+    # ── Step 2: TOTP ──────────────────────────────────────────────
     logger.info("Step 2: TOTP verification...")
-    time.sleep(1)  # Small delay to avoid rate limiting
-    totp_code = get_totp()
+    time.sleep(2)
+    totp_code = pyotp.TOTP(KITE_TOTP_SECRET).now()
+
     r2 = session.post(
         "https://kite.zerodha.com/api/twofa",
         data={
@@ -92,6 +106,7 @@ def login() -> str:
             "twofa_value": totp_code,
             "twofa_type":  "totp",
         },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=20,
     )
     r2.raise_for_status()
@@ -100,56 +115,79 @@ def login() -> str:
         raise ValueError(f"TOTP failed: {d2.get('message', d2)}")
     logger.info("Step 2 OK — TOTP verified")
 
-    # ── Step 3: Get request_token via connect/login redirect ───────
+    # Extract enc_token — it comes in response data or cookies
+    enc_token = None
+    if isinstance(d2.get("data"), dict):
+        enc_token = d2["data"].get("enc_token")
+    if not enc_token:
+        for cookie in session.cookies:
+            if cookie.name == "enctoken":
+                enc_token = cookie.value
+                break
+    if enc_token:
+        logger.info(f"enc_token obtained: {enc_token[:10]}...")
+        session.cookies.set("enctoken", enc_token, domain=".zerodha.com")
+
+    # ── Step 3: Get request_token ─────────────────────────────────
     logger.info("Step 3: Getting request_token...")
     time.sleep(1)
 
-    # This will redirect to https://127.0.0.1?request_token=XXX&...
-    # We catch the redirect and extract the token from the URL
     connect_url = f"https://kite.zerodha.com/connect/login?api_key={KITE_API_KEY}&v=3"
-
-    try:
-        r3 = session.get(connect_url, allow_redirects=False, timeout=20)
-        redirect_url = r3.headers.get("Location", "")
-    except requests.exceptions.ConnectionError as e:
-        # Sometimes the redirect to 127.0.0.1 raises a connection error
-        # The URL is still in the exception
-        redirect_url = str(e)
-
-    logger.info(f"Redirect URL: {redirect_url[:80]}...")
-
-    # Extract request_token from URL
     request_token = None
 
-    if "request_token=" in redirect_url:
-        parsed = urlparse(redirect_url)
-        params = parse_qs(parsed.query)
-        request_token = params.get("request_token", [None])[0]
+    # Try A: No redirect following — check Location header
+    try:
+        r3a = session.get(connect_url, allow_redirects=False, timeout=20)
+        location = r3a.headers.get("Location", "")
+        logger.info(f"A - Location: {location[:120]}")
+        request_token = extract_token_from_url(location)
+    except Exception as e:
+        logger.warning(f"A failed: {e}")
 
+    # Try B: Follow redirects — 127.0.0.1 causes ConnectionError containing the URL
     if not request_token:
-        # Try following redirects fully
         try:
-            r3b = session.get(connect_url, allow_redirects=True, timeout=20)
+            r3b = session.get(connect_url, allow_redirects=True, timeout=10)
             final_url = r3b.url
-            if "request_token=" in final_url:
-                parsed = urlparse(final_url)
-                params = parse_qs(parsed.query)
-                request_token = params.get("request_token", [None])[0]
+            logger.info(f"B - Final URL: {final_url[:120]}")
+            request_token = extract_token_from_url(final_url)
+        except requests.exceptions.ConnectionError as e:
+            err_str = str(e)
+            logger.info(f"B - ConnectionError (expected for 127.0.0.1): {err_str[:120]}")
+            request_token = extract_token_from_url(err_str)
         except Exception as e:
-            url_str = str(e)
-            if "request_token=" in url_str:
-                import re
-                match = re.search(r'request_token=([^&\s"\']+)', url_str)
-                if match:
-                    request_token = match.group(1)
+            logger.warning(f"B failed: {e}")
+
+    # Try C: Use enc_token as Authorization header
+    if not request_token and enc_token:
+        try:
+            r3c = requests.get(
+                connect_url,
+                headers={
+                    "User-Agent":      "Mozilla/5.0",
+                    "Authorization":   f"enctoken {enc_token}",
+                    "X-Kite-Version":  "3",
+                },
+                cookies={"enctoken": enc_token},
+                allow_redirects=False,
+                timeout=20,
+            )
+            location = r3c.headers.get("Location", "")
+            logger.info(f"C - Location: {location[:120]}")
+            request_token = extract_token_from_url(location)
+        except Exception as e:
+            logger.warning(f"C failed: {e}")
 
     if not request_token:
-        raise ValueError(f"Could not extract request_token from: {redirect_url[:200]}")
+        raise ValueError(
+            "Could not extract request_token. "
+            "Please verify redirect URL in Kite Connect app is set to: https://127.0.0.1"
+        )
 
     logger.info(f"Step 3 OK — request_token: {request_token[:10]}...")
 
-    # ── Step 4: Exchange request_token for access_token ───────────
-    logger.info("Step 4: Generating session...")
+    # ── Step 4: Exchange for access_token ─────────────────────────
+    logger.info("Step 4: Generating access token...")
     from kiteconnect import KiteConnect
     kite = KiteConnect(api_key=KITE_API_KEY)
     data = kite.generate_session(request_token, api_secret=KITE_API_SECRET)
@@ -159,90 +197,83 @@ def login() -> str:
     return access_token
 
 
-def save_token(access_token: str):
-    """
-    Save access_token to GitHub Secrets so trading_session job can use it.
-    Also saves to .env for local use.
-    """
-    # Save to GitHub Secret (for GitHub Actions)
-    if GITHUB_TOKEN and GITHUB_REPO:
-        try:
-            import base64
-            from nacl import encoding, public
+def save_to_github_secrets(access_token: str):
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        logger.warning("No GITHUB_TOKEN/GITHUB_REPO — skipping GitHub Secrets update")
+        return
+    try:
+        import base64
+        from nacl import encoding, public
 
-            # Get repo public key
-            headers = {
-                "Authorization": f"token {GITHUB_TOKEN}",
-                "Accept": "application/vnd.github.v3+json",
-            }
-            key_resp = requests.get(
-                f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/public-key",
-                headers=headers,
-                timeout=15,
-            )
-            key_resp.raise_for_status()
-            key_data = key_resp.json()
-            public_key = key_data["key"]
-            key_id     = key_data["key_id"]
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        key_resp = requests.get(
+            f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/public-key",
+            headers=headers, timeout=15,
+        )
+        key_resp.raise_for_status()
+        key_data   = key_resp.json()
+        pk         = public.PublicKey(key_data["key"].encode(), encoding.Base64Encoder())
+        box        = public.SealedBox(pk)
+        encrypted  = base64.b64encode(box.encrypt(access_token.encode())).decode()
+        r = requests.put(
+            f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/KITE_ACCESS_TOKEN",
+            headers=headers,
+            json={"encrypted_value": encrypted, "key_id": key_data["key_id"]},
+            timeout=15,
+        )
+        if r.status_code in (201, 204):
+            logger.info("✅ KITE_ACCESS_TOKEN saved to GitHub Secrets")
+        else:
+            logger.warning(f"GitHub Secret update: {r.status_code}")
+    except Exception as e:
+        logger.error(f"Failed to save to GitHub Secrets: {e}")
 
-            # Encrypt the token
-            pk = public.PublicKey(public_key.encode(), encoding.Base64Encoder())
-            box = public.SealedBox(pk)
-            encrypted = base64.b64encode(
-                box.encrypt(access_token.encode())
-            ).decode()
 
-            # Update the secret
-            secret_resp = requests.put(
-                f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/KITE_ACCESS_TOKEN",
-                headers=headers,
-                json={"encrypted_value": encrypted, "key_id": key_id},
-                timeout=15,
-            )
-            if secret_resp.status_code in (201, 204):
-                logger.info("✅ KITE_ACCESS_TOKEN saved to GitHub Secrets")
-            else:
-                logger.warning(f"GitHub Secret update: {secret_resp.status_code}")
-        except Exception as e:
-            logger.error(f"Failed to save to GitHub Secrets: {e}")
-
-    # Also save to local .env if it exists
+def save_to_env(access_token: str):
     env_file = os.path.join(os.path.dirname(__file__), ".env")
-    if os.path.exists(env_file):
-        try:
-            with open(env_file, "r") as f:
-                lines = f.readlines()
-            updated = False
-            new_lines = []
-            for line in lines:
-                if line.startswith("KITE_ACCESS_TOKEN="):
-                    new_lines.append(f"KITE_ACCESS_TOKEN={access_token}\n")
-                    updated = True
-                else:
-                    new_lines.append(line)
-            if not updated:
+    if not os.path.exists(env_file):
+        return
+    try:
+        with open(env_file) as f:
+            lines = f.readlines()
+        new_lines = []
+        updated = False
+        for line in lines:
+            if line.startswith("KITE_ACCESS_TOKEN="):
                 new_lines.append(f"KITE_ACCESS_TOKEN={access_token}\n")
-            with open(env_file, "w") as f:
-                f.writelines(new_lines)
-            logger.info(".env updated with new access token")
-        except Exception as e:
-            logger.error(f"Failed to update .env: {e}")
+                updated = True
+            else:
+                new_lines.append(line)
+        if not updated:
+            new_lines.append(f"KITE_ACCESS_TOKEN={access_token}\n")
+        with open(env_file, "w") as f:
+            f.writelines(new_lines)
+        logger.info(".env updated")
+    except Exception as e:
+        logger.error(f"Failed to update .env: {e}")
 
 
 def main():
     logger.info("=== Zerodha Daily Token Refresh ===")
 
-    missing = [k for k in ["KITE_API_KEY","KITE_API_SECRET","KITE_USER_ID","KITE_PASSWORD","KITE_TOTP_SECRET"]
-               if not os.getenv(k)]
+    missing = [k for k in [
+        "KITE_API_KEY", "KITE_API_SECRET",
+        "KITE_USER_ID", "KITE_PASSWORD", "KITE_TOTP_SECRET"
+    ] if not os.getenv(k)]
+
     if missing:
-        msg = f"❌ Missing credentials: {missing}"
+        msg = f"❌ Missing Kite credentials: {missing}"
         logger.error(msg)
         notify(msg)
         sys.exit(1)
 
     try:
         access_token = login()
-        save_token(access_token)
+        save_to_github_secrets(access_token)
+        save_to_env(access_token)
         notify("🔑 Kite token refreshed ✅ — Tej is ready to trade today")
         logger.info("✅ Token refresh complete")
         sys.exit(0)
@@ -250,8 +281,8 @@ def main():
     except Exception as e:
         logger.error(f"Token refresh failed: {e}")
         notify(
-            f"❌ Kite token refresh FAILED: {str(e)[:150]}\n"
-            f"Trading will NOT execute today without a valid token."
+            f"❌ Kite token refresh FAILED: {str(e)[:200]}\n"
+            f"⚠️ Tej will NOT trade today without a valid token."
         )
         sys.exit(1)
 
