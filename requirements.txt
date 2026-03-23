@@ -1,9 +1,7 @@
 # nifty50-shortsell-agent (Tej) — Python Dependencies
-# Install with: pip install -r requirements.txt
 # Python 3.11 required (GitHub Actions default)
-# Total cost for data: Rs 0 (all free public APIs)
 
-# ── ML (for ensemble predictor — free, no GPU needed) ────────────────────────
+# ── ML ────────────────────────────────────────────────────────────────────────
 scikit-learn>=1.4.0
 
 # ── Free NSE Market Data ──────────────────────────────────────────────────────
@@ -15,7 +13,8 @@ yfinance>=0.2.40
 # ── Technical Analysis ────────────────────────────────────────────────────────
 pandas>=2.1.0
 numpy>=1.26.0
-pandas-ta
+ta>=0.11.0
+git+https://github.com/twopirllc/pandas-ta.git@development
 
 # ── Web Scraping & HTTP ───────────────────────────────────────────────────────
 requests>=2.31.0
@@ -23,19 +22,13 @@ beautifulsoup4>=4.12.0
 feedparser>=6.0.11
 ddgs>=0.1
 
-# ── Broker: Zerodha Kite Connect Personal (FREE) ─────────────────────────────
+# ── Broker ────────────────────────────────────────────────────────────────────
 kiteconnect>=5.0.1
-
-# ── TOTP for automated Kite login ─────────────────────────────────────────────
 pyotp>=2.9.0
-
-# ── GitHub API ────────────────────────────────────────────────────────────────
 PyNaCl>=1.5.0
 
-# ── Scheduling ────────────────────────────────────────────────────────────────
+# ── Scheduling & Utils ────────────────────────────────────────────────────────
 schedule>=1.2.1
-
-# ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.1
 pytz>=2024.1
 colorlog>=6.8.2
