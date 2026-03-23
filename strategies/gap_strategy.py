@@ -117,7 +117,7 @@ class GapUpShortStrategy:
         rsi_at_open = 50.0
         if df is not None and len(df) > 14:
             try:
-                import pandas_ta as ta
+                import ta; import ta.momentum; import ta.trend; import ta.volatility
                 rsi_series = ta.rsi(df["close"], length=14)
                 rsi_at_open = float(rsi_series.iloc[-1])
             except Exception:
