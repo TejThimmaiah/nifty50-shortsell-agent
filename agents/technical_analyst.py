@@ -1,13 +1,17 @@
 """
 Technical Analysis Engine
 Calculates all indicators needed to identify short selling opportunities.
-Uses pandas-ta (free) — no paid data feed required.
+Uses ta library (free, PyPI) — no paid data feed required.
 """
 
 import logging
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+import ta
+import ta.momentum
+import ta.trend
+import ta.volatility
+import ta.volume
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict
 from config import TRADING
@@ -61,42 +65,37 @@ def calculate_all(df: pd.DataFrame, symbol: str = "") -> Optional[TechnicalSigna
 
     try:
         # ── RSI ─────────────────────────────────────────────
-        df["rsi"] = ta.rsi(df["close"], length=TRADING.rsi_period)
+        df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=TRADING.rsi_period).rsi()
 
         # ── MACD ─────────────────────────────────────────────
-        macd = ta.macd(df["close"], fast=12, slow=26, signal=9)
-        df["macd"]        = macd["MACD_12_26_9"]
-        df["macd_signal"] = macd["MACDs_12_26_9"]
-        df["macd_hist"]   = macd["MACDh_12_26_9"]
+        macd_ind = ta.trend.MACD(df["close"], window_fast=12, window_slow=26, window_sign=9)
+        df["macd"]        = macd_ind.macd()
+        df["macd_signal"] = macd_ind.macd_signal()
+        df["macd_hist"]   = macd_ind.macd_diff()
 
         # ── Bollinger Bands ───────────────────────────────────
-        bb = ta.bbands(df["close"], length=20, std=2)
-        # pandas-ta column naming varies by version — detect dynamically
-        bb_upper_col = next((c for c in bb.columns if c.startswith("BBU")), None)
-        bb_lower_col = next((c for c in bb.columns if c.startswith("BBL")), None)
-        bb_mid_col   = next((c for c in bb.columns if c.startswith("BBM")), None)
-        bb_pct_col   = next((c for c in bb.columns if c.startswith("BBP")), None)
-        df["bb_upper"] = bb[bb_upper_col] if bb_upper_col else df["close"] * 1.02
-        df["bb_lower"] = bb[bb_lower_col] if bb_lower_col else df["close"] * 0.98
-        df["bb_mid"]   = bb[bb_mid_col]   if bb_mid_col   else df["close"]
-        df["bb_pct"]   = bb[bb_pct_col]   if bb_pct_col   else 0.5
+        bb_ind = ta.volatility.BollingerBands(df["close"], window=20, window_dev=2)
+        df["bb_upper"] = bb_ind.bollinger_hband()
+        df["bb_lower"] = bb_ind.bollinger_lband()
+        df["bb_mid"]   = bb_ind.bollinger_mavg()
+        df["bb_pct"]   = bb_ind.bollinger_pband()
 
         # ── EMA ──────────────────────────────────────────────
-        df["ema9"]  = ta.ema(df["close"], length=9)
-        df["ema21"] = ta.ema(df["close"], length=21)
-        df["ema50"] = ta.ema(df["close"], length=50)
+        df["ema9"]  = ta.trend.EMAIndicator(df["close"], window=9).ema_indicator()
+        df["ema21"] = ta.trend.EMAIndicator(df["close"], window=21).ema_indicator()
+        df["ema50"] = ta.trend.EMAIndicator(df["close"], window=50).ema_indicator()
 
         # ── Volume MA ─────────────────────────────────────────
         df["vol_ma20"] = df["volume"].rolling(20).mean()
         df["vol_ratio"] = df["volume"] / df["vol_ma20"]
 
         # ── Stochastic ───────────────────────────────────────
-        stoch = ta.stoch(df["high"], df["low"], df["close"])
-        df["stoch_k"] = stoch["STOCHk_14_3_3"]
-        df["stoch_d"] = stoch["STOCHd_14_3_3"]
+        stoch_ind = ta.momentum.StochasticOscillator(df["high"], df["low"], df["close"], window=14, smooth_window=3)
+        df["stoch_k"] = stoch_ind.stoch()
+        df["stoch_d"] = stoch_ind.stoch_signal()
 
         # ── ATR (for SL calculation) ──────────────────────────
-        df["atr"] = ta.atr(df["high"], df["low"], df["close"], length=14)
+        df["atr"] = ta.volatility.AverageTrueRange(df["high"], df["low"], df["close"], window=14).average_true_range()
 
         # ── Support & Resistance (pivot points) ──────────────
         support, resistance = _calculate_sr_levels(df)
