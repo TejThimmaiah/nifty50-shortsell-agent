@@ -159,24 +159,45 @@ class TradeExecutorAgent:
     # ──────────────────────────────────────────────────────────────
 
     def _init_kite(self):
-        """Initialize Zerodha Kite Connect session."""
+        """Initialize Zerodha Kite Connect session — non-crashing lazy init."""
+        import os
+        api_key      = KITE_API_KEY or os.getenv("KITE_API_KEY", "")
+        access_token = KITE_ACCESS_TOKEN or os.getenv("KITE_ACCESS_TOKEN", "")
+        if not api_key or not access_token:
+            logger.warning("Kite credentials not set — will retry when token available")
+            self._kite = None
+            return
         try:
             from kiteconnect import KiteConnect
-            self._kite = KiteConnect(api_key=KITE_API_KEY)
-            self._kite.set_access_token(KITE_ACCESS_TOKEN)
+            self._kite = KiteConnect(api_key=api_key)
+            self._kite.set_access_token(access_token)
             profile = self._kite.profile()
-            logger.info(f"Kite connected: {profile.get('user_name')}")
-        except ImportError:
-            logger.error("kiteconnect package not installed. Run: pip install kiteconnect")
-            raise
+            logger.info(f"Kite connected: {profile.get('user_name')} ({profile.get('user_id')})")
         except Exception as e:
             logger.error(f"Kite init error: {e}")
-            fix = self.healer.heal(
-                f"Zerodha Kite Connect initialization failed: {e}",
-                {"error": str(e), "api": "Zerodha Kite"}
-            )
-            logger.info(f"Healer: {fix.get('solution')}")
-            raise
+            self._kite = None
+
+    def _ensure_kite(self) -> bool:
+        """Ensure Kite is connected — retry with latest env token."""
+        import os
+        if self._kite is not None:
+            return True
+        api_key      = KITE_API_KEY or os.getenv("KITE_API_KEY", "")
+        access_token = os.getenv("KITE_ACCESS_TOKEN", "") or KITE_ACCESS_TOKEN
+        if not api_key or not access_token:
+            logger.warning("No Kite credentials — cannot place live orders")
+            return False
+        try:
+            from kiteconnect import KiteConnect
+            self._kite = KiteConnect(api_key=api_key)
+            self._kite.set_access_token(access_token)
+            self._kite.profile()
+            logger.info("Kite reconnected successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Kite reconnect failed: {e}")
+            self._kite = None
+            return False
 
     def _live_short(self, symbol, quantity, entry_price, stop_loss, target) -> Dict:
         """Place real short sell order on Zerodha with GTT for SL and target."""
