@@ -47,6 +47,12 @@ from intelligence.adaptive_config import adaptive_config
 from intelligence.intermarket import intermarket_analyser
 from intelligence.market_regime import regime_detector
 from intelligence.signal_fusion import signal_fusion
+
+# Phase 2+3 upgrades — loaded safely, fallback to None if unavailable
+try:
+    from utils.upgrade_loader import upgrades as _upgrades
+except Exception:
+    _upgrades = None
 from intelligence.statistical_edge import edge_calculator
 from intelligence.self_improver import self_improver
 from intelligence.trade_memory import memory_store
@@ -311,6 +317,20 @@ class BrainOrchestrator:
 
                     # Context for this specific stock
                     stock_ctx = {**self._current_market_ctx, "sector": c.sector}
+
+                    # Phase 2+3 upgrade signals — enhances brain decision
+                    if _upgrades:
+                        try:
+                            enh = _upgrades.get_enhanced_signals(c.symbol, None, stock_ctx)
+                            stock_ctx.update(enh)
+                            if enh.get("sentiment_signal") == "AVOID_SHORT":
+                                logger.info(f"  {c.symbol}: Sentiment says AVOID — skipping")
+                                continue
+                            if enh.get("insider_signal") in ("STRONG_BULLISH",):
+                                logger.info(f"  {c.symbol}: Insider buying — skipping")
+                                continue
+                        except Exception as _e:
+                            logger.debug(f"Upgrade signals skipped: {_e}")
 
                     # Brain chain-of-thought reasoning
                     brain_decision = self.brain.decide(
