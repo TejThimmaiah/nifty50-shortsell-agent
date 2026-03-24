@@ -207,10 +207,23 @@ jobs:
           nproc && free -h && df -h && python --version
 
       - name: Run trading agent (market hours)
-        run: timeout 21000 python main.py || true
+        run: |
+          # Load token from artifact if available
+          if [ -f /tmp/kite/token.env ]; then
+            export $(cat /tmp/kite/token.env | xargs)
+            echo "Loaded token: ${KITE_ACCESS_TOKEN:0:8}..."
+          fi
+          # Also check GITHUB_ENV
+          if [ -z "$KITE_ACCESS_TOKEN" ] && [ -f "$GITHUB_ENV" ]; then
+            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" $GITHUB_ENV | cut -d= -f2)
+            if [ -n "$TOKEN" ]; then
+              export KITE_ACCESS_TOKEN="$TOKEN"
+              echo "Loaded token from GITHUB_ENV: ${TOKEN:0:8}..."
+            fi
+          fi
+          timeout 21000 python main.py || true
         env:
           SQUARE_OFF_OVERRIDE: "15:08"
-          KITE_ACCESS_TOKEN: ${{ env.KITE_ACCESS_TOKEN }}
 
       - name: Upload today's logs
         uses: actions/upload-artifact@v4
