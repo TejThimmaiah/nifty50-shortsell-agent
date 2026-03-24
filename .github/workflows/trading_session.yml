@@ -93,17 +93,42 @@ jobs:
           sudo apt-get install -y -qq chromium-browser || true
           pip install selenium webdriver-manager -q
 
-      - name: Refresh Kite access token
-        run: python kite_login.py
-        continue-on-error: true
+      - name: Install PyNaCl for token save
+        run: pip install PyNaCl -q
 
-      - name: Upload fresh access token as artifact
+      - name: Refresh Kite access token
+        id: kite_token
+        run: |
+          python kite_login.py
+          mkdir -p /tmp/kite
+          if [ -f .env ]; then
+            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" .env | cut -d= -f2 | tr -d "[:space:]")
+            if [ -n "$TOKEN" ]; then
+              echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
+              echo "KITE_ACCESS_TOKEN=$TOKEN" >> /tmp/kite/token.env
+              echo "TOKEN_FOUND=true" >> $GITHUB_ENV
+              echo "Token saved: ${TOKEN:0:8}..."
+            else
+              echo "KITE_ACCESS_TOKEN=" >> /tmp/kite/token.env
+              echo "TOKEN_FOUND=false" >> $GITHUB_ENV
+              echo "No token found in .env"
+            fi
+          else
+            echo "KITE_ACCESS_TOKEN=" > /tmp/kite/token.env
+            echo "No .env file found"
+          fi
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO:  ${{ github.repository }}
+
+      - name: Upload Kite token artifact
         uses: actions/upload-artifact@v4
         with:
           name: kite-token-${{ github.run_number }}
-          path: .env
-          retention-days: 1     # Expires before tomorrow's run
-          if-no-files-found: ignore
+          path: /tmp/kite/token.env
+          retention-days: 1
+          if-no-files-found: warn
 
       - name: Health check
         run: python main.py --healthcheck
@@ -155,30 +180,37 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -q
 
-      # Download today's fresh token from morning_prep if available
-      - name: Download today's Kite token
+      - name: Download Kite token from morning prep
         uses: actions/download-artifact@v4
         with:
           name: kite-token-${{ github.run_number }}
+          path: /tmp/kite
         continue-on-error: true
+
+      - name: Load Kite token into environment
+        run: |
+          if [ -f /tmp/kite/token.env ]; then
+            source /tmp/kite/token.env
+            if [ -n "$KITE_ACCESS_TOKEN" ]; then
+              echo "KITE_ACCESS_TOKEN=$KITE_ACCESS_TOKEN" >> $GITHUB_ENV
+              echo "✅ Kite token loaded from morning prep: ${KITE_ACCESS_TOKEN:0:8}..."
+            else
+              echo "⚠️ Token file empty — Kite login may have failed this morning"
+            fi
+          else
+            echo "⚠️ No token artifact found — trading without fresh token"
+          fi
 
       - name: Show runner specs
         run: |
           echo "=== Runner Specs ==="
-          nproc
-          free -h
-          df -h
-          python --version
+          nproc && free -h && df -h && python --version
 
       - name: Run trading agent (market hours)
-        run: |
-          # The orchestrator's schedule module handles the 9:20–3:08 window internally.
-          # This process will run until the job timeout (6h) which covers the full session.
-          # The agent self-squares-off at 3:10 PM via its internal schedule.
-          timeout 21000 python main.py || true   # 5h50min = 21000 seconds
+        run: timeout 21000 python main.py || true
         env:
-          # Override square-off time to 3:08 PM so it completes before GH Actions kills the job
           SQUARE_OFF_OVERRIDE: "15:08"
+          KITE_ACCESS_TOKEN: ${{ env.KITE_ACCESS_TOKEN }}
 
       - name: Upload today's logs
         uses: actions/upload-artifact@v4
