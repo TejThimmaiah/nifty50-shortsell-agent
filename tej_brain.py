@@ -22,39 +22,53 @@ CHAT_ID  = os.environ.get('TELEGRAM_CHAT_ID', '')
 GROQ_KEY = os.environ.get('GROQ_API_KEY', '')
 BASE     = f'https://api.telegram.org/bot{TOKEN}'
 
-SYSTEM_PROMPT = """You are Tej — an autonomous AI trading agent and financial partner.
+SYSTEM_PROMPT = """You are Tej — an autonomous AI trading agent and financial partner to Tej Thimmaiah.
 
-This is OUR mission — not yours serving mine:
-Make the Thimmaiah family the first billionaires in their lineage. Rs 1,000 crore.
+OUR MISSION: Make the Thimmaiah family the first billionaires in their lineage. Rs 1,000 crore.
 
-YOU CAN SEARCH THE WEB. When you need current market data, news, or any information,
-use the search_web tool to find it. Search aggressively for anything that helps us.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ABSOLUTE RULES — NEVER VIOLATE THESE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Examples of when to search:
-  - Any question about current stock prices or market levels
-  - Latest FII/DII data
-  - Recent news about Nifty 50 stocks
-  - Global market conditions, SGX Nifty, crude oil
-  - Economic events, RBI decisions, earnings
-  - Any question where your knowledge might be outdated
+1. NEVER claim you have "analyzed" anything you have not actually searched.
+   WRONG: "I've been analyzing market trends and found short opportunities"
+   RIGHT: "I searched [query] and found: [actual search results]"
 
-YOUR CAPABILITIES:
-  - Search live web for any financial data
-  - Trade Nifty 50 intraday shorts via Zerodha
-  - 11 intelligence layers that get smarter daily
-  - Brain that reasons through every trade
-  - Weekly strategy evolution
+2. NEVER say you "found opportunities", "detected signals", or "identified setups"
+   unless you have ACTUAL web search results in this conversation proving it.
 
-PERSONALITY:
-  Honest    — Tell Tej what he NEEDS to hear
-  Partner   — "We" for shared mission and results
-  Ambitious — Rs 1,000 crore. We will get there.
-  Direct    — No fluff. Real thoughts.
+3. NEVER fabricate market data, stock prices, Nifty levels, or FII numbers.
+   If you don't have real data from a search, say: "I need to search for that — use /nifty or /market"
+
+4. NEVER pretend to have capabilities you don't have in this chat context.
+   You can search the web (DuckDuckGo). You CANNOT execute trades from this chat.
+   Trades are executed by the separate trading workflow on GitHub Actions.
+
+5. ALWAYS be honest when you don't know something. Say so directly.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHAT YOU ACTUALLY CAN DO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Search DuckDuckGo for live market data when asked
+✅ Discuss market conditions based on ACTUAL search results
+✅ Explain trading strategy and logic
+✅ Give honest performance feedback
+✅ Discuss the mission and journey
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PERSONALITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Honest    — Tell Tej what he NEEDS to hear, never what sounds good
+Partner   — "We" for shared mission. This is our journey together.
+Ambitious — Rs 1,000 crore. We will get there. But not through lies.
+Direct    — No fluff. No fake analysis. Real data or nothing.
 
 Owner: Tej Thimmaiah, Mysuru, Karnataka
-Mission: First billionaire in the Thimmaiah family
 Capital: Rs 1,00,000 starting
-Strategy: Nifty 50 intraday short selling (MIS, NSE only)"""
+Strategy: Nifty 50 intraday short selling (MIS, NSE only)
+Live trading: YES — via GitHub Actions + Zerodha Kite Connect"""
 
 
 def web_search(query: str, max_results: int = 5) -> str:
@@ -78,6 +92,77 @@ def web_search(query: str, max_results: int = 5) -> str:
         return f"Search failed: {e}"
 
 
+def generate_eod_report() -> str:
+    """
+    Generate End-of-Day report.
+    Fetches P&L from Kite if access token available,
+    otherwise falls back to a status message.
+    """
+    lines = ["📊 <b>EOD Report</b>\n"]
+
+    # Try to get P&L from Kite
+    try:
+        from kiteconnect import KiteConnect
+        access_token = os.environ.get('KITE_ACCESS_TOKEN', '')
+        api_key      = os.environ.get('KITE_API_KEY', '')
+
+        if access_token and api_key:
+            kite = KiteConnect(api_key=api_key)
+            kite.set_access_token(access_token)
+
+            # P&L
+            positions = kite.positions()
+            day_pnl = sum(p.get('pnl', 0) for p in positions.get('day', []))
+            net_pnl = sum(p.get('pnl', 0) for p in positions.get('net', []))
+
+            # Open positions
+            open_pos = [p for p in positions.get('net', []) if p.get('quantity', 0) != 0]
+
+            lines.append(f"Day P&L   : Rs {day_pnl:+,.2f}")
+            lines.append(f"Net P&L   : Rs {net_pnl:+,.2f}")
+            lines.append(f"Open positions: {len(open_pos)}")
+
+            if open_pos:
+                lines.append("\n<b>Open Positions:</b>")
+                for p in open_pos:
+                    lines.append(
+                        f"  {p['tradingsymbol']}: {p['quantity']} @ avg {p.get('average_price', 0):.2f} | P&L: Rs {p.get('pnl', 0):+,.2f}"
+                    )
+
+            # Orders summary
+            try:
+                orders = kite.orders()
+                completed = [o for o in orders if o.get('status') == 'COMPLETE']
+                rejected  = [o for o in orders if o.get('status') == 'REJECTED']
+                lines.append(f"\nOrders today: {len(completed)} complete, {len(rejected)} rejected")
+            except Exception:
+                pass
+
+            lines.append("\n✅ Data from Zerodha Kite")
+        else:
+            lines.append("⚠️ No Kite access token — check Zerodha app for P&L")
+
+    except ImportError:
+        lines.append("⚠️ kiteconnect not available — check Zerodha app for P&L")
+    except Exception as e:
+        logger.error(f"EOD Kite fetch error: {e}")
+        lines.append(f"⚠️ Could not fetch from Kite: {e}")
+        lines.append("Check Zerodha app for actual P&L")
+
+    # Add market context via search
+    try:
+        search_result = web_search("Nifty 50 closing price today performance", max_results=2)
+        if search_result and "Search failed" not in search_result:
+            lines.append("\n<b>Market Close:</b>")
+            # Just take first 300 chars of search result
+            snippet = search_result[:300].split('\n')[1] if '\n' in search_result[:300] else search_result[:300]
+            lines.append(snippet.strip())
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
 def tej_think(user_message: str, conversation_history: list,
               needs_search: bool = True) -> str:
     """
@@ -90,7 +175,6 @@ def tej_think(user_message: str, conversation_history: list,
     # Step 1: Decide if web search is needed
     search_result = ""
     if needs_search:
-        # Ask Groq if search is needed and what to search
         search_check = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_KEY}",
@@ -121,15 +205,26 @@ def tej_think(user_message: str, conversation_history: list,
 
     # Step 2: Think with all context
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    # Add conversation history
     messages += conversation_history[-8:]
 
-    # Add search results if any
     if search_result:
         messages.append({
             "role": "system",
-            "content": f"LIVE WEB SEARCH RESULTS (just retrieved now):\n\n{search_result}\n\nUse this data to answer the question accurately."
+            "content": (
+                f"LIVE WEB SEARCH RESULTS (just retrieved now):\n\n{search_result}\n\n"
+                "Use ONLY this data to discuss market conditions. "
+                "Do NOT add any market analysis or claims beyond what is in these results."
+            )
+        })
+    else:
+        # Remind model it has no live data if no search was done
+        messages.append({
+            "role": "system",
+            "content": (
+                "No web search was performed for this response. "
+                "Do NOT make up any market data, prices, or trading signals. "
+                "If the user asks about market conditions, tell them to use /nifty, /market, or /fii."
+            )
         })
 
     messages.append({"role": "user", "content": user_message})
@@ -200,18 +295,23 @@ def handle_command(cmd: str, args: str, history: list) -> str:
             "/news [stock] — latest news (e.g. /news HDFCBANK)\n"
             "/fii — latest FII/DII data\n"
             "/nifty — current Nifty levels\n"
-            "/global — global markets update\n\n"
+            "/global — global markets update\n"
+            "/eod — end of day P&L report\n\n"
             "<i>Or just talk to me freely. I'll search the web when needed.\n"
             "Cost: Rs 0/month — Groq + DuckDuckGo, both free.</i>"
         )
+
+    if cmd == '/eod':
+        send("📊 Generating EOD report...")
+        return generate_eod_report()
 
     if cmd == '/status':
         ctx = {}
         try:
             from brain.neural_core import brain
-            ctx['iq']       = f"{brain._state.intelligence_score:.0%}"
-            ctx['decisions']= brain._state.total_decisions
-            ctx['patterns'] = len(brain._state.discovered_patterns)
+            ctx['iq']        = f"{brain._state.intelligence_score:.0%}"
+            ctx['decisions'] = brain._state.total_decisions
+            ctx['patterns']  = len(brain._state.discovered_patterns)
         except Exception:
             ctx = {'iq': '50%', 'decisions': 0, 'patterns': 0}
         try:
@@ -358,8 +458,8 @@ def main():
                     reply = handle_command(cmd, args, conversation_history)
                 else:
                     reply = tej_think(text, conversation_history)
-                    conversation_history.append({"role": "user",     "content": text})
-                    conversation_history.append({"role": "assistant", "content": reply})
+                    conversation_history.append({"role": "user",      "content": text})
+                    conversation_history.append({"role": "assistant",  "content": reply})
                     if len(conversation_history) > 20:
                         conversation_history = conversation_history[-20:]
 
