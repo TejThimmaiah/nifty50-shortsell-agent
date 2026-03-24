@@ -21,7 +21,7 @@ ta>=0.11.0                  # Technical analysis library (replaces pandas-ta)
 requests>=2.31.0
 beautifulsoup4>=4.12.0      # Screener.in fundamentals
 feedparser>=6.0.11          # RSS news feeds
-ddgs>=0.1    # Self-healer web search
+duckduckgo-search>=6.0  # Self-healer web search (provides DDGS)
 
 # ── Broker: Zerodha Kite Connect Personal (FREE for order placement) ──────────
 kiteconnect>=5.0.1          # Order API only — no market data subscription needed

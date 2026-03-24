@@ -85,12 +85,14 @@ class TradeExecutorAgent:
             orders = self._kite.orders()
             for order in orders:
                 if (order.get("tradingsymbol") == symbol and
+                        order.get("product") == "MIS" and
                         order.get("status") in ("TRIGGER PENDING", "OPEN")):
+                    variety = order.get("variety", "regular")
                     self._kite.cancel_order(
                         order_id=order["order_id"],
-                        variety=order.get("variety", "regular")
+                        variety=variety,
                     )
-                    logger.info(f"Cancelled order {order['order_id']} for {symbol}")
+                    logger.info(f"Cancelled MIS order {order['order_id']} for {symbol} (status={order['status']})")
         except Exception as e:
             logger.error(f"Cancel orders error [{symbol}]: {e}")
             self.healer.heal(f"Failed to cancel orders for {symbol}: {e}", {"symbol": symbol})
@@ -128,7 +130,7 @@ class TradeExecutorAgent:
         return results
 
     def get_positions(self) -> Dict:
-        """Fetch all current open positions."""
+        """Fetch all current open positions from the live Zerodha account."""
         if PAPER_TRADE:
             return {
                 sym: pos
@@ -136,22 +138,72 @@ class TradeExecutorAgent:
                 if pos.get("status") == "OPEN"
             }
 
-        if not self._kite:
+        if not self._ensure_kite():
             return {}
         try:
             positions = self._kite.positions()
             return {
                 p["tradingsymbol"]: {
-                    "symbol": p["tradingsymbol"],
-                    "quantity": p["quantity"],
-                    "avg_price": p["average_price"],
-                    "unrealised_pnl": p["unrealised"],
+                    "symbol":          p["tradingsymbol"],
+                    "quantity":        p["quantity"],
+                    "avg_price":       p.get("average_price", 0),
+                    "last_price":      p.get("last_price", 0),
+                    "unrealised_pnl":  p.get("unrealised", 0),
+                    "realised_pnl":    p.get("realised", 0),
+                    "pnl":             p.get("pnl", 0),
+                    "product":         p.get("product", "MIS"),
                 }
                 for p in positions.get("net", [])
                 if p.get("quantity") != 0
             }
         except Exception as e:
             logger.error(f"Get positions error: {e}")
+            return {}
+
+    def get_account_balance(self) -> Dict:
+        """
+        Fetch real account balance and margin from the live Zerodha account.
+        Returns actual available cash, used margin, and today's P&L.
+        """
+        if PAPER_TRADE:
+            total_pnl = sum(
+                p.get("pnl", 0)
+                for p in self._paper_positions.values()
+                if p.get("status") == "CLOSED"
+            )
+            return {
+                "available_cash": PAPER_TRADE,
+                "used_margin": 0,
+                "total_pnl_today": total_pnl,
+                "paper": True,
+            }
+
+        if not self._ensure_kite():
+            return {}
+        try:
+            margins  = self._kite.margins()
+            equity   = margins.get("equity", {})
+            net_data = equity.get("net", 0)
+            available = equity.get("available", {})
+
+            # Today's P&L from positions
+            positions = self._kite.positions()
+            day_pnl   = sum(p.get("pnl", 0) for p in positions.get("day", []))
+
+            result = {
+                "available_cash":  float(available.get("cash", net_data) if isinstance(available, dict) else net_data),
+                "used_margin":     float(equity.get("utilised", {}).get("debits", 0) if isinstance(equity.get("utilised"), dict) else 0),
+                "total_pnl_today": float(day_pnl),
+                "paper": False,
+            }
+            logger.info(
+                f"Account: cash=₹{result['available_cash']:,.0f} | "
+                f"margin_used=₹{result['used_margin']:,.0f} | "
+                f"day_pnl=₹{result['total_pnl_today']:+,.0f}"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Get account balance error: {e}")
             return {}
 
     # ──────────────────────────────────────────────────────────────
@@ -200,64 +252,71 @@ class TradeExecutorAgent:
             return False
 
     def _live_short(self, symbol, quantity, entry_price, stop_loss, target) -> Dict:
-        """Place real short sell order on Zerodha with GTT for SL and target."""
-        from kiteconnect import KiteConnect
-
+        """
+        Place a real MIS short sell order on Zerodha NSE.
+        Uses:
+          - SELL MIS MARKET  for entry
+          - BUY  MIS SL-M    for stop loss (triggers when price RISES above SL)
+          - BUY  MIS LIMIT   for target   (triggers when price FALLS to target)
+        GTT orders are NOT used — they don't work reliably for intraday MIS positions.
+        """
         # Always ensure fresh Kite connection before placing orders
         if not self._ensure_kite():
             return {"status": "ERROR", "message": "Kite not connected — no valid access token"}
 
+        sl_order_id     = None
+        target_order_id = None
+
         try:
-            # Entry order — MIS (intraday), MARKET
+            # ── 1. Entry: SELL MIS MARKET (short) ────────────────────────────
             entry_order_id = self._kite.place_order(
                 tradingsymbol=symbol,
                 exchange=self._kite.EXCHANGE_NSE,
-                transaction_type=self._kite.TRANSACTION_TYPE_SELL,   # SHORT
+                transaction_type=self._kite.TRANSACTION_TYPE_SELL,
                 quantity=quantity,
-                product=self._kite.PRODUCT_MIS,                      # Intraday margin
+                product=self._kite.PRODUCT_MIS,
                 order_type=self._kite.ORDER_TYPE_MARKET,
                 variety=self._kite.VARIETY_REGULAR,
             )
-            logger.info(f"Entry order placed: {entry_order_id}")
-            time.sleep(1)   # Let the entry fill
+            logger.info(f"✅ Entry order placed: {entry_order_id} | {symbol} SHORT {quantity} @ MARKET")
+            time.sleep(1)   # Give exchange 1 second to process entry
 
-            # GTT for stop loss (trigger above entry for shorts)
-            sl_gtt_id = self._kite.place_gtt(
-                trigger_type=self._kite.GTT_TYPE_SINGLE,
+            # ── 2. Stop Loss: BUY MIS SL-M (triggers above entry for shorts) ─
+            #    trigger_price = stop_loss (price at which buy-back is triggered)
+            sl_order_id = self._kite.place_order(
                 tradingsymbol=symbol,
                 exchange=self._kite.EXCHANGE_NSE,
-                trigger_values=[stop_loss],
-                last_price=entry_price,
-                orders=[{
-                    "transaction_type": self._kite.TRANSACTION_TYPE_BUY,
-                    "quantity": quantity,
-                    "order_type": self._kite.ORDER_TYPE_MARKET,
-                    "product": self._kite.PRODUCT_MIS,
-                }]
+                transaction_type=self._kite.TRANSACTION_TYPE_BUY,
+                quantity=quantity,
+                product=self._kite.PRODUCT_MIS,
+                order_type=self._kite.ORDER_TYPE_SLM,   # Stop Loss Market
+                trigger_price=round(stop_loss, 2),
+                variety=self._kite.VARIETY_REGULAR,
+                tag="SL",
             )
+            logger.info(f"✅ SL order placed: {sl_order_id} | trigger={stop_loss}")
 
-            # GTT for target (trigger below entry for shorts)
-            target_gtt_id = self._kite.place_gtt(
-                trigger_type=self._kite.GTT_TYPE_SINGLE,
+            # ── 3. Target: BUY MIS LIMIT (fills when price falls to target) ──
+            target_order_id = self._kite.place_order(
                 tradingsymbol=symbol,
                 exchange=self._kite.EXCHANGE_NSE,
-                trigger_values=[target],
-                last_price=entry_price,
-                orders=[{
-                    "transaction_type": self._kite.TRANSACTION_TYPE_BUY,
-                    "quantity": quantity,
-                    "order_type": self._kite.ORDER_TYPE_MARKET,
-                    "product": self._kite.PRODUCT_MIS,
-                }]
+                transaction_type=self._kite.TRANSACTION_TYPE_BUY,
+                quantity=quantity,
+                product=self._kite.PRODUCT_MIS,
+                order_type=self._kite.ORDER_TYPE_LIMIT,
+                price=round(target, 2),
+                variety=self._kite.VARIETY_REGULAR,
+                tag="TGT",
             )
+            logger.info(f"✅ Target order placed: {target_order_id} | price={target}")
 
             return {
                 "status": "EXECUTED",
                 "symbol": symbol,
                 "quantity": quantity,
                 "entry_order_id": entry_order_id,
-                "sl_gtt_id": sl_gtt_id,
-                "target_gtt_id": target_gtt_id,
+                "sl_order_id": sl_order_id,
+                "target_order_id": target_order_id,
                 "entry_price": entry_price,
                 "stop_loss": stop_loss,
                 "target": target,
@@ -266,6 +325,14 @@ class TradeExecutorAgent:
 
         except Exception as e:
             logger.error(f"Live short order failed [{symbol}]: {e}")
+            # Cancel any orders that were already placed
+            for oid in [sl_order_id, target_order_id]:
+                if oid:
+                    try:
+                        self._kite.cancel_order(order_id=oid, variety=self._kite.VARIETY_REGULAR)
+                        logger.info(f"Rolled back order {oid}")
+                    except Exception:
+                        pass
             fix = self.healer.search_api_error_fix(str(e), "Zerodha Kite Connect")
             logger.info(f"Healer fix: {fix}")
             return {"status": "FAILED", "error": str(e), "healer_fix": fix}

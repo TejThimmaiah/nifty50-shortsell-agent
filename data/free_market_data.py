@@ -330,6 +330,19 @@ def _openchart_fetch(
         return None
 
 
+def _flatten_yf_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Flatten yfinance MultiIndex columns to plain lowercase strings.
+    yfinance ≥0.2.38 returns MultiIndex columns for single-ticker downloads.
+    e.g. ('Close', 'RELIANCE.NS') → 'close'
+    """
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0].lower() for col in df.columns]
+    else:
+        df.columns = [str(c).lower() for c in df.columns]
+    return df
+
+
 def _yfinance_intraday(
     symbol: str, interval: str, days: int
 ) -> Optional[pd.DataFrame]:
@@ -344,8 +357,8 @@ def _yfinance_intraday(
         )
         if df is None or df.empty:
             return None
-        df.columns  = [c.lower() for c in df.columns]
-        df.index    = pd.to_datetime(df.index)
+        df = _flatten_yf_columns(df)
+        df.index = pd.to_datetime(df.index)
         return df.dropna()
     except Exception as e:
         logger.debug(f"yfinance intraday error [{symbol}]: {e}")
@@ -364,8 +377,8 @@ def get_daily_ohlcv_free(symbol: str, days: int = 60) -> Optional[pd.DataFrame]:
             interval="1d", progress=False, auto_adjust=True
         )
         if df is not None and not df.empty:
-            df.columns = [c.lower() for c in df.columns]
-            df.index   = pd.to_datetime(df.index)
+            df = _flatten_yf_columns(df)
+            df.index = pd.to_datetime(df.index)
             return df.dropna()
     except Exception as e:
         logger.debug(f"yfinance daily error [{symbol}]: {e}")

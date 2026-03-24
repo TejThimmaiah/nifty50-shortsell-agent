@@ -75,14 +75,22 @@ def web_search(query: str, max_results: int = 5) -> str:
     """Search the web using DuckDuckGo — completely free."""
     try:
         try:
-            from ddgs import DDGS
-        except ImportError:
             from duckduckgo_search import DDGS
+        except ImportError:
+            from ddgs import DDGS
 
         results = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
-                results.append(f"**{r['title']}**\n{r['body']}\nSource: {r['href']}\n")
+        for attempt in range(2):
+            try:
+                with DDGS() as ddgs:
+                    for r in ddgs.text(query, max_results=max_results):
+                        results.append(f"**{r['title']}**\n{r['body']}\nSource: {r['href']}\n")
+                if results:
+                    break
+            except Exception as e:
+                logger.warning(f"Search attempt {attempt+1} failed: {e}")
+                if attempt == 0:
+                    import time as _t; _t.sleep(2)
 
         if results:
             return "\n---\n".join(results[:max_results])

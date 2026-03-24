@@ -214,6 +214,19 @@ def save_to_github(token):
         logger.error(f"GitHub Secret save failed: {e}")
 
 
+def write_token_file(token: str):
+    """
+    Write the access token to /tmp/tej/token.env for the GitHub Actions artifact.
+    The trading_session job downloads this artifact to load the fresh token.
+    """
+    import pathlib
+    token_dir  = pathlib.Path("/tmp/tej")
+    token_dir.mkdir(parents=True, exist_ok=True)
+    token_file = token_dir / "token.env"
+    token_file.write_text(f"KITE_ACCESS_TOKEN={token}\n")
+    logger.info(f"Token written to {token_file}")
+
+
 def main():
     logger.info("=== Zerodha Daily Token Refresh ===")
     missing = [k for k in ["KITE_API_KEY","KITE_API_SECRET","KITE_USER_ID","KITE_PASSWORD","KITE_TOTP_SECRET"]
@@ -224,9 +237,12 @@ def main():
 
     try:
         token = login()
+        # 1. Save to GitHub Secrets (for future workflow runs)
         save_to_github(token)
+        # 2. Write to file artifact (for the trading_session job in THIS run)
+        write_token_file(token)
         notify("🔑 Kite token refreshed ✅ — Tej is ready to trade today")
-        logger.info("✅ Done")
+        logger.info(f"✅ Done — token: {token[:12]}...")
         sys.exit(0)
     except Exception as e:
         logger.error(f"FAILED: {e}")

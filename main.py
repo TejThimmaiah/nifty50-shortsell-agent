@@ -140,10 +140,11 @@ def main():
         sys.exit(0)
 
     # ── Start Tej ──────────────────────────────────────────────────
-    issues = _check_env()
-    if issues:
-        for issue in issues:
-            logger.warning(f"Config: {issue}")
+    errors, warnings = _check_env()
+    for w in warnings:
+        logger.warning(f"Config: {w}")
+    for e in errors:
+        logger.error(f"Config: {e}")
 
     print("\n" + "═" * 52)
     print("  Starting Tej — Autonomous AI Trading Agent")

@@ -94,6 +94,15 @@ def get_quote(symbol: str) -> Optional[Dict]:
 # INTRADAY OHLCV via yfinance (most reliable free source)
 # ──────────────────────────────────────────────────────────────
 
+def _flatten_yf_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Flatten yfinance MultiIndex columns (breaking change in yfinance ≥0.2.38)."""
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0].lower() for col in df.columns]
+    else:
+        df.columns = [str(c).lower() for c in df.columns]
+    return df
+
+
 def get_intraday_ohlcv(symbol: str, interval: str = "5m", period: str = "1d") -> Optional[pd.DataFrame]:
     """
     Fetch intraday OHLCV data — free stack (OpenChart → yfinance).
@@ -117,8 +126,8 @@ def get_intraday_ohlcv(symbol: str, interval: str = "5m", period: str = "1d") ->
         df = yf.download(ticker, period=period, interval=interval,
                          progress=False, auto_adjust=True)
         if not df.empty:
-            df.index   = pd.to_datetime(df.index)
-            df.columns = [c.lower() for c in df.columns]
+            df = _flatten_yf_columns(df)
+            df.index = pd.to_datetime(df.index)
             return df.dropna()
     except Exception as e:
         logger.error(f"yfinance intraday fallback error [{symbol}]: {e}")
@@ -134,8 +143,8 @@ def get_historical_ohlcv(symbol: str, days: int = 60) -> Optional[pd.DataFrame]:
                          progress=False, auto_adjust=True)
         if df.empty:
             return None
+        df = _flatten_yf_columns(df)
         df.index = pd.to_datetime(df.index)
-        df.columns = [c.lower() for c in df.columns]
         return df.dropna()
     except Exception as e:
         logger.error(f"Historical fetch error [{symbol}]: {e}")

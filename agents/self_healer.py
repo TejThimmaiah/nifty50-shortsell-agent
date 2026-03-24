@@ -10,11 +10,22 @@ import time
 import json
 import requests
 from typing import Optional, Dict, List, Any
-try:
-    from ddgs import DDGS
-except ImportError:
-    from duckduckgo_search import DDGS
 from config import MAX_SEARCH_ATTEMPTS, SEARCH_COOLDOWN_SEC, GROQ_API_KEY, GEMINI_API_KEY, LLM_MODEL
+
+
+def _import_ddgs():
+    """Import DDGS — supports both duckduckgo-search ≥6 and legacy ddgs package."""
+    try:
+        from duckduckgo_search import DDGS
+        return DDGS
+    except ImportError:
+        try:
+            from ddgs import DDGS
+            return DDGS
+        except ImportError:
+            raise ImportError(
+                "duckduckgo-search not installed. Run: pip install duckduckgo-search>=6.0"
+            )
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +40,7 @@ class SelfHealerAgent:
     def __init__(self):
         self.search_history: List[str] = []
         self.last_search_time: float = 0
-        self._ddgs = DDGS()
+        self._DDGS = _import_ddgs()  # Import class, create fresh instance per call
 
     # ──────────────────────────────────────────────────────────────
     # MAIN ENTRY POINT
@@ -172,23 +183,22 @@ class SelfHealerAgent:
         self.search_history.append(query)
         logger.info(f"Searching: {query}")
 
-        try:
-            results = list(self._ddgs.text(
-                query,
-                max_results=max_results,
-                region="in-en",          # India region for better NSE results
-                safesearch="moderate",
-            ))
-            logger.debug(f"Found {len(results)} results for: {query}")
-            return results
-        except Exception as e:
-            logger.warning(f"Search failed [{query}]: {e}")
+        # Always use a fresh DDGS instance — persistent instances fail in duckduckgo-search ≥6
+        for attempt, kwargs in [
+            (1, {"region": "in-en", "safesearch": "moderate"}),
+            (2, {}),   # Retry with defaults (global region)
+        ]:
             try:
-                # Retry with global region
-                results = list(DDGS().text(query, max_results=max_results))
-                return results
-            except Exception:
-                return []
+                with self._DDGS() as ddgs:
+                    results = list(ddgs.text(query, max_results=max_results, **kwargs))
+                if results:
+                    logger.debug(f"Found {len(results)} results for: {query}")
+                    return results
+            except Exception as e:
+                logger.warning(f"Search attempt {attempt} failed [{query}]: {e}")
+                time.sleep(2)
+
+        return []
 
     def _build_queries(self, problem: str, context: Dict) -> List[str]:
         """Build targeted search queries from the problem description."""

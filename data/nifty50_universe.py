@@ -125,6 +125,7 @@ def is_nifty50(symbol: str) -> bool:
 
 # ── Instrument token reverse lookup (NSE token → symbol name) ─────────────────
 # Used by FreeTickStreamer._token_to_symbol()
+# Note: These are approximate NSE instrument tokens. Verify against kite.instruments("NSE").
 NIFTY50_TOKENS: dict = {
     738561:  "RELIANCE",
     341249:  "TCS",
@@ -133,7 +134,7 @@ NIFTY50_TOKENS: dict = {
     315394:  "HINDUNILVR",
     1270529: "ICICIBANK",
     492033:  "KOTAKBANK",
-    2939649: "LT",
+    2939649: "LARSEN",
     779521:  "SBIN",
     2714625: "BHARTIARTL",
     60417:   "ASIANPAINT",
@@ -158,19 +159,19 @@ NIFTY50_TOKENS: dict = {
     633601:  "ONGC",
     3001089: "JSWSTEEL",
     3456768: "TATAMOTORS",
-    315394:  "GRASIM",
+    1215745: "GRASIM",
     694978:  "CIPLA",
     694144:  "COALINDIA",
     4364289: "BRITANNIA",
     526849:  "BPCL",
     232961:  "EICHERMOT",
-    288513:  "MM",
-    119553:  "BAJAJ_AUTO",
+    288513:  "M&M",
+    119553:  "BAJAJ-AUTO",
     345089:  "HEROMOTOCO",
-    4662023: "TATACONSUM",
-    4375073: "SBILIFE",
-    4336641: "HDFCLIFE",
     1510401: "INDUSINDBK",
-    2889473: "UPL",
-    # Additional tokens can be added as discovered
+    3832577: "SHRIRAMFIN",
+    4343041: "TRENT",
+    3834113: "LTIM",
+    4458241: "GODREJCP",
+    # Additional tokens for remaining Nifty50 stocks can be added as discovered
 }

@@ -68,18 +68,15 @@ def overbought_df():
 
 
 @pytest.fixture
-def risk_mgr():
-    """RiskManagerAgent backed by an in-memory SQLite DB."""
-    import tempfile
+def risk_mgr(tmp_path):
+    """RiskManagerAgent backed by a temp-dir SQLite DB (auto-cleaned by pytest)."""
     import config
-    tmp = tempfile.mktemp(suffix=".db")
     original = config.DB_PATH
-    config.DB_PATH = tmp
+    config.DB_PATH = str(tmp_path / "test_trades.db")
     mgr = __import__("agents.risk_manager", fromlist=["RiskManagerAgent"]).RiskManagerAgent(capital=100_000)
     yield mgr
     config.DB_PATH = original
-    if os.path.exists(tmp):
-        os.remove(tmp)
+    # pytest's tmp_path is cleaned up automatically — no manual os.remove needed
 
 
 @pytest.fixture
@@ -310,25 +307,24 @@ class TestSelfHealer:
         assert agent._score_to_label(0.3)  == "BULLISH"
         assert agent._score_to_label(0.7)  == "STRONG_BULLISH"
 
-    @patch("agents.self_healer.DDGS")
-    def test_healer_returns_dict(self, mock_ddgs):
-        mock_ddgs.return_value.text.return_value = [
-            {"title": "NSE tips", "body": "Market is bearish today", "href": "http://test.com"}
-        ]
+    def test_healer_returns_dict(self):
         from agents.self_healer import SelfHealerAgent
         healer = SelfHealerAgent()
-        with patch.object(healer, "_call_llm", return_value="Use tighter stop losses."):
-            result = healer.heal("Test problem", {"symbol": "RELIANCE"})
+        # Mock the internal _search method directly so no real network call
+        with patch.object(healer, "_search", return_value=[
+            {"title": "NSE tips", "body": "Market is bearish today", "href": "http://test.com"}
+        ]):
+            with patch.object(healer, "_call_llm", return_value="Use tighter stop losses."):
+                result = healer.heal("Test problem", {"symbol": "RELIANCE"})
         assert isinstance(result, dict)
         assert "solution" in result
         assert "confidence" in result
 
-    @patch("agents.self_healer.DDGS")
-    def test_healer_handles_empty_search(self, mock_ddgs):
-        mock_ddgs.return_value.text.return_value = []
+    def test_healer_handles_empty_search(self):
         from agents.self_healer import SelfHealerAgent
         healer = SelfHealerAgent()
-        result = healer.heal("Totally unknown problem")
+        with patch.object(healer, "_search", return_value=[]):
+            result = healer.heal("Totally unknown problem")
         assert result["confidence"] < 0.5   # Low confidence when no results
 
 
