@@ -130,13 +130,14 @@ class TestTechnicalAnalyst:
 
     def test_bearish_divergence_detection(self):
         from agents.technical_analyst import _check_bearish_divergence
-        import pandas_ta as ta
+        import ta.momentum
         # Create data with bearish divergence: price higher high, RSI lower high
         df = make_ohlcv(n=50, trend="up")
-        df["rsi"] = ta.rsi(df["close"], length=14)
+        rsi_indicator = ta.momentum.RSIIndicator(df["close"], window=14)
+        df["rsi"] = rsi_indicator.rsi()
         # Should not crash even with NaN values
         result = _check_bearish_divergence(df)
-        assert isinstance(result, bool)
+        assert isinstance(result, (bool, __import__('numpy').bool_))
 
     def test_sr_levels_ordered(self, overbought_df):
         from agents.technical_analyst import _calculate_sr_levels
