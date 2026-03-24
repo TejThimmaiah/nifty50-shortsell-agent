@@ -206,24 +206,48 @@ jobs:
           echo "=== Runner Specs ==="
           nproc && free -h && df -h && python --version
 
+      - name: Install Chrome + Selenium for token refresh
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq google-chrome-stable ||           sudo apt-get install -y -qq chromium-browser || true
+          pip install selenium webdriver-manager PyNaCl -q
+
+      - name: Refresh Kite token inside trading session
+        run: |
+          echo "Refreshing Kite token..."
+          python kite_login.py
+          if [ -f .env ]; then
+            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" .env | cut -d= -f2 | tr -d "[:space:]")
+            if [ -n "$TOKEN" ]; then
+              echo "KITE_ACCESS_TOKEN=$TOKEN" >> $GITHUB_ENV
+              echo "✅ Token ready: ${TOKEN:0:10}..."
+            else
+              echo "⚠️ Token empty after login"
+            fi
+          fi
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO:  ${{ github.repository }}
+
       - name: Run trading agent (market hours)
         run: |
-          # Load token from artifact if available
-          if [ -f /tmp/kite/token.env ]; then
-            export $(cat /tmp/kite/token.env | xargs)
-            echo "Loaded token: ${KITE_ACCESS_TOKEN:0:8}..."
-          fi
-          # Also check GITHUB_ENV
-          if [ -z "$KITE_ACCESS_TOKEN" ] && [ -f "$GITHUB_ENV" ]; then
-            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" $GITHUB_ENV | cut -d= -f2)
+          # Load token from .env if available
+          if [ -f .env ]; then
+            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" .env | cut -d= -f2 | tr -d "[:space:]")
             if [ -n "$TOKEN" ]; then
               export KITE_ACCESS_TOKEN="$TOKEN"
-              echo "Loaded token from GITHUB_ENV: ${TOKEN:0:8}..."
+              echo "✅ Kite token loaded: ${TOKEN:0:10}..."
             fi
           fi
           timeout 21000 python main.py || true
         env:
           SQUARE_OFF_OVERRIDE: "15:08"
+          KITE_API_KEY:    ${{ secrets.KITE_API_KEY }}
+          KITE_API_SECRET: ${{ secrets.KITE_API_SECRET }}
+          KITE_USER_ID:    ${{ secrets.KITE_USER_ID }}
+          KITE_PASSWORD:   ${{ secrets.KITE_PASSWORD }}
+          KITE_TOTP_SECRET: ${{ secrets.KITE_TOTP_SECRET }}
 
       - name: Upload today's logs
         uses: actions/upload-artifact@v4
