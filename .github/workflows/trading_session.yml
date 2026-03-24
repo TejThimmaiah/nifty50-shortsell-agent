@@ -131,11 +131,7 @@ jobs:
     name: Trading Session (9:20 AM – 3:08 PM IST)
     runs-on: ubuntu-latest
     needs: [morning_prep]
-    if: |
-      always() && (
-        github.event_name == 'schedule' && github.event.schedule == '50 3 * * 1-5' ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'trading_session')
-      )
+    if: always()
     timeout-minutes: 360    # 6 hours max (GitHub Actions hard limit)
     env:
       GROQ_API_KEY:           ${{ secrets.GROQ_API_KEY }}
