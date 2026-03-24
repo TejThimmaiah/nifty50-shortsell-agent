@@ -112,8 +112,12 @@ def _shooting_star(df: pd.DataFrame) -> Optional[CandlePattern]:
 
     is_small_body  = body <= total * 0.30
     is_long_upper  = upper >= body * 2.0
-    is_small_lower = lower <= body * 0.5
-    is_after_uptrend = float(df["close"].iloc[-4]) < float(df["close"].iloc[-2])
+    is_small_lower = lower <= upper * 0.30   # lower shadow should be small vs upper shadow
+    # uptrend check: safe for short dataframes
+    if len(df) >= 4:
+        is_after_uptrend = float(df["close"].iloc[-4]) < float(df["close"].iloc[-2])
+    else:
+        is_after_uptrend = float(df["close"].iloc[0]) < float(df["close"].iloc[-1])
 
     if is_small_body and is_long_upper and is_small_lower:
         # Volume confirmation
