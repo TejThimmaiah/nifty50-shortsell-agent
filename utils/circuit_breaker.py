@@ -171,13 +171,21 @@ class CircuitBreaker:
         if nifty_change_pct <= -4.0:
             severity = "EXTREME_CRASH"
             reason = (
-                f"Nifty down {nifty_change_pct:.2f}% — extreme crash, "
+                f"NIFTY_CRASH: Nifty down {nifty_change_pct:.2f}% — extreme crash, "
                 f"stocks may hit lower circuit breakers. "
                 f"Cannot cover shorts on circuit-locked stocks."
             )
             self._trigger(severity, reason, auto_reset_min=60)
             logger.warning(f"⚠️ EXTREME CRASH CB: {reason}")
-        elif -4.0 < nifty_change_pct <= -1.0:
+        elif -4.0 < nifty_change_pct <= -3.0:
+            severity = "NIFTY_CRASH"
+            reason = (
+                f"NIFTY_CRASH: Nifty down {nifty_change_pct:.2f}% — "
+                f"pausing new entries to manage lower circuit risk."
+            )
+            self._trigger(severity, reason, auto_reset_min=30)
+            logger.warning(f"⚠️ NIFTY CRASH CB: {reason}")
+        elif -3.0 < nifty_change_pct <= -1.0:
             # This is the SWEET SPOT for short selling — log it as opportunity
             logger.info(
                 f"📉 Nifty {nifty_change_pct:.2f}% — IDEAL short-selling environment. "
