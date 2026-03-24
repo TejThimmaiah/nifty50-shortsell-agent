@@ -1,33 +1,41 @@
-# nifty50-shortsell-agent (Tej) — Python Dependencies
-# Python 3.11 required (GitHub Actions default)
+# FinanceMeridian Trading Agent — Python Dependencies
+# Install with: pip install -r requirements.txt
+# Python 3.11+ required
+# Total cost for data: ₹0 (all free public APIs)
 
-# ── ML ────────────────────────────────────────────────────────────────────────
-scikit-learn>=1.4.0
+# ── ML (for ensemble predictor — free, no GPU needed) ────────────────────────
+scikit-learn>=1.4.0         # Random Forest, Gradient Boosting, Logistic Regression, Naive Bayes
 
-# ── Free NSE Market Data ──────────────────────────────────────────────────────
-openchart>=0.1.5
-jugaad-data>=0.24
-nsetools>=2.0.1
-yfinance>=0.2.40
+# ── Free NSE Market Data (replaces Zerodha WebSocket ₹500/month) ─────────────
+openchart>=0.1.5            # Intraday OHLCV from NSE (MIT license, free)
+jugaad-data>=0.24           # Live quotes + historical from NSE (free)
+nsetools>=2.0.1             # Live quotes fallback (free, NSE public API)
+yfinance>=0.2.40            # Yahoo Finance daily OHLCV (free)
 
 # ── Technical Analysis ────────────────────────────────────────────────────────
 pandas>=2.1.0
 numpy>=1.26.0
-ta>=0.11.0
+ta>=0.11.0                  # Technical analysis library (replaces pandas-ta)
 
 # ── Web Scraping & HTTP ───────────────────────────────────────────────────────
 requests>=2.31.0
-beautifulsoup4>=4.12.0
-feedparser>=6.0.11
-ddgs>=0.1
+beautifulsoup4>=4.12.0      # Screener.in fundamentals
+feedparser>=6.0.11          # RSS news feeds
+ddgs>=0.1    # Self-healer web search
 
-# ── Broker ────────────────────────────────────────────────────────────────────
-kiteconnect>=5.0.1
+# ── Broker: Zerodha Kite Connect Personal (FREE for order placement) ──────────
+kiteconnect>=5.0.1          # Order API only — no market data subscription needed
+
+# ── TOTP for automated Kite login ─────────────────────────────────────────────
 pyotp>=2.9.0
-PyNaCl>=1.5.0
 
-# ── Scheduling & Utils ────────────────────────────────────────────────────────
+# ── GitHub API (for pushing Kite token to GitHub Secrets from GCP) ───────────
+PyNaCl>=1.5.0               # Encryption for GitHub Secrets API
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
 schedule>=1.2.1
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.1
 pytz>=2024.1
 colorlog>=6.8.2
@@ -36,3 +44,17 @@ colorlog>=6.8.2
 pytest>=8.0.0
 pytest-cov>=5.0.0
 pytest-timeout>=2.3.1
+
+# ── Phase 2 Upgrades ─────────────────────────────────────────────────────────
+chromadb>=0.4.0             # Vector memory for trade similarity search
+langgraph>=0.1.0            # Production-grade agent orchestration
+langchain>=0.1.0            # LangChain base
+
+# ── Phase 3 Upgrades ─────────────────────────────────────────────────────────
+deap>=1.4.1                 # Genetic algorithm strategy evolution
+scipy>=1.11.0               # Statistical functions for tail risk
+faiss-cpu>=1.7.4            # Meta FAISS vector search
+redis>=5.0.0                # Working memory (optional — falls back to dict)
+shap>=0.44.0                # Explainable AI (optional)
+matplotlib>=3.7.0           # Chart rendering for chart vision
+gtts>=2.5.0                 # Google TTS fallback
