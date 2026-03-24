@@ -1,79 +1,53 @@
 name: nifty50-shortsell-agent — Trading Agent
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ARCHITECTURE: GitHub Actions replaces Oracle Cloud as the compute layer.
-#
-# WHY THIS WORKS:
-#   Public repos → UNLIMITED free GitHub Actions minutes
-#   Each ubuntu-latest runner = 2 vCPUs + 7GB RAM + 14GB SSD
-#   Market hours = 9:20 AM – 3:10 PM IST = 5h 50min (within 6h job limit)
-#   Cost: ₹0 for compute. Only Zerodha Market Data = ₹500/month.
-#
-# JOBS:
-#   trading_session  — Runs the full agent 9:20 AM – 3:08 PM IST (Mon-Fri)
-#   square_off       — Force-closes all positions at 3:10 PM IST
-#   morning_prep     — Token refresh + health check at 8:45 AM IST
-#   eod_report       — Generates and commits the daily HTML report at 3:35 PM IST
-#   weekly_backtest  — Runs every Monday 7 AM IST on last 30 days
-# ─────────────────────────────────────────────────────────────────────────────
-
 on:
   schedule:
-    # Morning prep: 8:45 AM IST = 3:15 AM UTC Mon–Fri
-    - cron: "15 3 * * 1-5"
-    # Trading session: 9:20 AM IST = 3:50 AM UTC Mon–Fri
-    - cron: "50 3 * * 1-5"
-    # Square-off: 3:10 PM IST = 9:40 AM UTC Mon–Fri
-    - cron: "40 9 * * 1-5"
-    # EOD report: 3:35 PM IST = 10:05 AM UTC Mon–Fri
-    - cron: "05 10 * * 1-5"
-    # Weekly backtest: Monday 7:00 AM IST = 1:30 AM UTC
-    - cron: "30 1 * * 1"
-
+    - cron: "15 3 * * 1-5"   # 8:45 AM IST — morning prep + Kite login
+    - cron: "40 9 * * 1-5"   # 3:10 PM IST — emergency square-off
+    - cron: "05 10 * * 1-5"  # 3:35 PM IST — EOD report
+    - cron: "30 1 * * 1"     # 7:00 AM IST Monday — weekly backtest
   workflow_dispatch:
     inputs:
       job:
-        description: "Which job to run manually?"
+        description: "Which job to run"
         required: true
-        default: "trading_session"
+        default: "morning_prep"
         type: choice
         options:
-          - trading_session
           - morning_prep
-          - square_off
+          - trading_session
+          - squareoff
           - eod_report
-          - backtest
           - healthcheck
-          - paper_day_sim
+          - backtest
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SHARED ENV — used by ALL jobs
+# ─────────────────────────────────────────────────────────────────────────────
 env:
-  PAPER_TRADE:        ${{ vars.PAPER_TRADE || 'true' }}
-  LOG_LEVEL:          INFO
-  TZ:                 Asia/Kolkata
-  PYTHONUNBUFFERED:   "1"
+  GROQ_API_KEY:        ${{ secrets.GROQ_API_KEY }}
+  TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+  KITE_API_KEY:        ${{ secrets.KITE_API_KEY }}
+  KITE_API_SECRET:     ${{ secrets.KITE_API_SECRET }}
+  KITE_USER_ID:        ${{ secrets.KITE_USER_ID }}
+  KITE_PASSWORD:       ${{ secrets.KITE_PASSWORD }}
+  KITE_TOTP_SECRET:    ${{ secrets.KITE_TOTP_SECRET }}
+  KITE_ACCESS_TOKEN:   ${{ secrets.KITE_ACCESS_TOKEN }}
+  PAPER_TRADE:         "false"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# JOB 1: Morning prep — token refresh + sanity check before market opens
-# ─────────────────────────────────────────────────────────────────────────────
 jobs:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 1 — MORNING PREP: Login to Kite, refresh token, health check
+  # Runs at 8:45 AM IST every weekday
+  # ───────────────────────────────────────────────────────────────────────────
   morning_prep:
     name: Morning Prep (8:45 AM IST)
     runs-on: ubuntu-latest
     if: |
-      github.event_name == 'schedule' && github.event.schedule == '15 3 * * 1-5' ||
+      (github.event_name == 'schedule' && github.event.schedule == '15 3 * * 1-5') ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'morning_prep')
-    env:
-      GROQ_API_KEY:           ${{ secrets.GROQ_API_KEY }}
-      GEMINI_API_KEY:         ${{ secrets.GEMINI_API_KEY }}
-      TELEGRAM_BOT_TOKEN:     ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:       ${{ secrets.TELEGRAM_CHAT_ID }}
-      KITE_API_KEY:           ${{ secrets.KITE_API_KEY }}
-      KITE_API_SECRET:        ${{ secrets.KITE_API_SECRET }}
-      KITE_USER_ID:           ${{ secrets.KITE_USER_ID }}
-      KITE_PASSWORD:          ${{ secrets.KITE_PASSWORD }}
-      KITE_TOTP_SECRET:       ${{ secrets.KITE_TOTP_SECRET }}
-      GITHUB_TOKEN:           ${{ secrets.GITHUB_TOKEN }}
-      GITHUB_REPO:            ${{ github.repository }}
 
     steps:
       - uses: actions/checkout@v4
@@ -84,90 +58,76 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt -q
+        run: |
+          pip install -r requirements.txt -q
+          pip install selenium webdriver-manager PyNaCl -q
 
-      - name: Install Chrome for Kite login
+      - name: Install Chrome
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq google-chrome-stable || \
           sudo apt-get install -y -qq chromium-browser || true
-          pip install selenium webdriver-manager -q
-
-      - name: Install PyNaCl for token save
-        run: pip install PyNaCl -q
 
       - name: Refresh Kite access token
-        id: kite_token
+        run: python kite_login.py
+
+      - name: Extract and save token
+        id: token
         run: |
-          python kite_login.py
-          mkdir -p /tmp/kite
           if [ -f .env ]; then
-            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" .env | cut -d= -f2 | tr -d "[:space:]")
+            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" .env | cut -d= -f2 | tr -d '[:space:]')
             if [ -n "$TOKEN" ]; then
-              echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
-              echo "KITE_ACCESS_TOKEN=$TOKEN" >> /tmp/kite/token.env
-              echo "TOKEN_FOUND=true" >> $GITHUB_ENV
-              echo "Token saved: ${TOKEN:0:8}..."
+              echo "value=$TOKEN" >> $GITHUB_OUTPUT
+              echo "found=true" >> $GITHUB_OUTPUT
+              echo "✅ Token: ${TOKEN:0:10}..."
             else
-              echo "KITE_ACCESS_TOKEN=" >> /tmp/kite/token.env
-              echo "TOKEN_FOUND=false" >> $GITHUB_ENV
-              echo "No token found in .env"
+              echo "found=false" >> $GITHUB_OUTPUT
+              echo "⚠️ No token in .env"
             fi
           else
-            echo "KITE_ACCESS_TOKEN=" > /tmp/kite/token.env
-            echo "No .env file found"
+            echo "found=false" >> $GITHUB_OUTPUT
           fi
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPO:  ${{ github.repository }}
 
-      - name: Upload Kite token artifact
+      - name: Save token artifact
+        run: |
+          mkdir -p /tmp/tej
+          echo "KITE_ACCESS_TOKEN=${{ steps.token.outputs.value }}" > /tmp/tej/token.env
+          cat /tmp/tej/token.env
+
+      - name: Upload token artifact
         uses: actions/upload-artifact@v4
         with:
           name: kite-token-${{ github.run_number }}
-          path: /tmp/kite/token.env
+          path: /tmp/tej/token.env
           retention-days: 1
-          if-no-files-found: warn
 
       - name: Health check
         run: python main.py --healthcheck
 
-      - name: Notify market open
+      - name: Notify Telegram
         run: |
           python -c "
           import requests, os
-          token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-          chat  = os.environ.get('TELEGRAM_CHAT_ID', '')
-          if token and chat:
-              requests.post(
-                  f'https://api.telegram.org/bot{token}/sendMessage',
-                  json={'chat_id': chat,
-                        'text': '🌅 Morning prep complete. Trading starts in 30 min.'},
-                  timeout=5
-              )
+          t = os.environ.get('TELEGRAM_BOT_TOKEN','')
+          c = os.environ.get('TELEGRAM_CHAT_ID','')
+          found = '${{ steps.token.outputs.found }}'
+          icon = '✅' if found == 'true' else '⚠️'
+          msg = f'{icon} Morning prep complete. Tej starts trading at 9:20 AM IST.'
+          if t and c:
+              requests.post(f'https://api.telegram.org/bot{t}/sendMessage',
+                  json={'chat_id': c, 'text': msg}, timeout=10)
           "
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 2: MAIN TRADING SESSION — runs the full agent loop 9:20 AM – 3:08 PM IST
-  # GitHub Actions job timeout max = 6h. Market window = 5h 48min. Fits perfectly.
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2 — TRADING SESSION: Full autonomous trading 9:20 AM – 3:08 PM IST
+  # Starts automatically after morning_prep OR can be triggered manually
+  # ───────────────────────────────────────────────────────────────────────────
   trading_session:
     name: Trading Session (9:20 AM – 3:08 PM IST)
     runs-on: ubuntu-latest
-    needs: [morning_prep]
+    needs: morning_prep
     if: always()
-    timeout-minutes: 360    # 6 hours max (GitHub Actions hard limit)
-    env:
-      GROQ_API_KEY:           ${{ secrets.GROQ_API_KEY }}
-      GEMINI_API_KEY:         ${{ secrets.GEMINI_API_KEY }}
-      TELEGRAM_BOT_TOKEN:     ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:       ${{ secrets.TELEGRAM_CHAT_ID }}
-      KITE_API_KEY:           ${{ secrets.KITE_API_KEY }}
-      KITE_API_SECRET:        ${{ secrets.KITE_API_SECRET }}
-      KITE_ACCESS_TOKEN:      ${{ secrets.KITE_ACCESS_TOKEN }}   # Updated by morning_prep or GCP cron
-      CLOUDFLARE_WEBHOOK_URL:    ${{ secrets.CLOUDFLARE_WEBHOOK_URL }}
-      CLOUDFLARE_WEBHOOK_SECRET: ${{ secrets.CLOUDFLARE_WEBHOOK_SECRET }}
+    timeout-minutes: 360
 
     steps:
       - uses: actions/checkout@v4
@@ -180,290 +140,52 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -q
 
-      - name: Download Kite token from morning prep
+      - name: Download Kite token
         uses: actions/download-artifact@v4
         with:
           name: kite-token-${{ github.run_number }}
-          path: /tmp/kite
+          path: /tmp/tej
         continue-on-error: true
 
-      - name: Load Kite token into environment
+      - name: Load Kite token
         run: |
-          if [ -f /tmp/kite/token.env ]; then
-            source /tmp/kite/token.env
+          if [ -f /tmp/tej/token.env ]; then
+            source /tmp/tej/token.env
             if [ -n "$KITE_ACCESS_TOKEN" ]; then
               echo "KITE_ACCESS_TOKEN=$KITE_ACCESS_TOKEN" >> $GITHUB_ENV
-              echo "✅ Kite token loaded from morning prep: ${KITE_ACCESS_TOKEN:0:8}..."
+              echo "✅ Token loaded: ${KITE_ACCESS_TOKEN:0:10}..."
             else
-              echo "⚠️ Token file empty — Kite login may have failed this morning"
+              echo "⚠️ Token file empty"
             fi
           else
-            echo "⚠️ No token artifact found — trading without fresh token"
+            echo "⚠️ No token artifact found"
           fi
 
-      - name: Show runner specs
-        run: |
-          echo "=== Runner Specs ==="
-          nproc && free -h && df -h && python --version
-
-      - name: Install Chrome + Selenium for token refresh
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq google-chrome-stable ||           sudo apt-get install -y -qq chromium-browser || true
-          pip install selenium webdriver-manager PyNaCl -q
-
-      - name: Refresh Kite token inside trading session
-        run: |
-          echo "Refreshing Kite token..."
-          python kite_login.py
-          if [ -f .env ]; then
-            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" .env | cut -d= -f2 | tr -d "[:space:]")
-            if [ -n "$TOKEN" ]; then
-              echo "KITE_ACCESS_TOKEN=$TOKEN" >> $GITHUB_ENV
-              echo "✅ Token ready: ${TOKEN:0:10}..."
-            else
-              echo "⚠️ Token empty after login"
-            fi
-          fi
-        continue-on-error: true
+      - name: Run Tej trading agent
+        run: timeout 21600 python main.py || true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPO:  ${{ github.repository }}
-
-      - name: Run trading agent (market hours)
-        run: |
-          # Load token from .env if available
-          if [ -f .env ]; then
-            TOKEN=$(grep "^KITE_ACCESS_TOKEN=" .env | cut -d= -f2 | tr -d "[:space:]")
-            if [ -n "$TOKEN" ]; then
-              export KITE_ACCESS_TOKEN="$TOKEN"
-              echo "✅ Kite token loaded: ${TOKEN:0:10}..."
-            fi
-          fi
-          timeout 21000 python main.py || true
-        env:
+          KITE_ACCESS_TOKEN: ${{ env.KITE_ACCESS_TOKEN }}
           SQUARE_OFF_OVERRIDE: "15:08"
-          KITE_API_KEY:    ${{ secrets.KITE_API_KEY }}
-          KITE_API_SECRET: ${{ secrets.KITE_API_SECRET }}
-          KITE_USER_ID:    ${{ secrets.KITE_USER_ID }}
-          KITE_PASSWORD:   ${{ secrets.KITE_PASSWORD }}
-          KITE_TOTP_SECRET: ${{ secrets.KITE_TOTP_SECRET }}
 
-      - name: Upload today's logs
+      - name: Upload logs
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: trading-logs-${{ github.run_number }}
           path: |
             logs/
-            db/trades.db
+            db/
           retention-days: 30
 
-      - name: Upload reports
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: reports-${{ github.run_number }}
-          path: reports/
-          retention-days: 30
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 3: SQUARE-OFF SAFETY NET — in case the trading session job crashes
-  # ─────────────────────────────────────────────────────────────────────────────
-  square_off:
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 3 — EMERGENCY SQUARE-OFF: Force close ALL positions at 3:10 PM IST
+  # ───────────────────────────────────────────────────────────────────────────
+  squareoff:
     name: Emergency Square-Off (3:10 PM IST)
     runs-on: ubuntu-latest
     if: |
-      github.event_name == 'schedule' && github.event.schedule == '40 9 * * 1-5' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'square_off')
-    env:
-      GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-      KITE_API_KEY:       ${{ secrets.KITE_API_KEY }}
-      KITE_API_SECRET:    ${{ secrets.KITE_API_SECRET }}
-      KITE_ACCESS_TOKEN:  ${{ secrets.KITE_ACCESS_TOKEN }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt -q
-
-      # Download today's DB (contains open positions) from trading session
-      - name: Download trading DB
-        uses: actions/download-artifact@v4
-        with:
-          pattern: trading-logs-*
-          merge-multiple: true
-        continue-on-error: true
-
-      - name: Force square-off all open positions
-        run: |
-          python - << 'EOF'
-          import os, sys
-          sys.path.insert(0, '.')
-          os.environ['PAPER_TRADE'] = os.environ.get('PAPER_TRADE', 'true')
-
-          from agents.risk_manager import RiskManagerAgent
-          from agents.trade_executor import TradeExecutorAgent
-          from agents.position_monitor import PositionMonitorAgent
-          from utils.alert_manager import alerts
-
-          risk_mgr = RiskManagerAgent()
-          executor = TradeExecutorAgent()
-          monitor  = PositionMonitorAgent(
-              risk_mgr=risk_mgr,
-              executor=executor,
-              notify_fn=lambda m: print(m),
-          )
-
-          results = monitor.force_square_off_all()
-          pnl = risk_mgr.get_today_pnl()
-          print(f"\n=== Square-off complete ===")
-          print(f"Positions closed: {len(results)}")
-          print(f"Day P&L: ₹{pnl:,.0f}")
-          alerts.trade(f"🔔 3:10 PM square-off complete | Day P&L: ₹{pnl:,.0f}")
-          EOF
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 4: EOD REPORT — generate HTML report and commit to repo
-  # ─────────────────────────────────────────────────────────────────────────────
-  eod_report:
-    name: EOD Report (3:35 PM IST)
-    runs-on: ubuntu-latest
-    needs: [square_off]
-    if: |
-      always() && (
-        github.event_name == 'schedule' && github.event.schedule == '05 10 * * 1-5' ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'eod_report')
-      )
-    env:
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt -q
-
-      - name: Download today's DB and logs
-        uses: actions/download-artifact@v4
-        with:
-          pattern: trading-logs-*
-          merge-multiple: true
-        continue-on-error: true
-
-      - name: Generate EOD report
-        run: |
-          python - << 'EOF'
-          import os, sys
-          sys.path.insert(0, '.')
-          from agents.risk_manager import RiskManagerAgent
-          from reports.eod_reporter import EODReporter
-
-          risk_mgr = RiskManagerAgent()
-          reporter = EODReporter(risk_mgr=risk_mgr)
-          path = reporter.generate()
-          print(f"Report generated: {path}")
-          EOF
-
-      - name: Commit report to GitHub Pages
-        uses: EndBug/add-and-commit@v9
-        with:
-          add: "reports/"
-          message: "📊 EOD report ${{ github.run_number }} — $(date +'%Y-%m-%d')"
-          default_author: github_actions
-        continue-on-error: true
-
-      - name: Upload report artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: eod-report-${{ github.run_number }}
-          path: reports/
-          retention-days: 90
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 5: WEEKLY BACKTEST — every Monday morning, validate strategy still works
-  # ─────────────────────────────────────────────────────────────────────────────
-  weekly_backtest:
-    name: Weekly Backtest (Monday 7 AM IST)
-    runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'schedule' && github.event.schedule == '30 1 * * 1' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'backtest')
-    env:
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt -q
-
-      - name: Run backtest on priority watchlist
-        run: |
-          python -m backtest.backtester \
-            --universe priority \
-            --days 30
-
-      - name: Notify backtest complete
-        run: |
-          python -c "
-          import requests, os, glob, json
-          token = os.environ.get('TELEGRAM_BOT_TOKEN','')
-          chat  = os.environ.get('TELEGRAM_CHAT_ID','')
-          if not token or not chat:
-              exit()
-          reports = glob.glob('reports/backtest_*.json')
-          if not reports:
-              msg = '📊 Weekly backtest complete. No report file found.'
-          else:
-              with open(sorted(reports)[-1]) as f:
-                  r = json.load(f)
-              msg = (f'📊 Weekly Backtest Done\n'
-                     f'Symbol: {r.get(\"symbol\",\"portfolio\")}\n'
-                     f'Win rate: {r.get(\"win_rate_pct\",0):.0f}%\n'
-                     f'Profit factor: {r.get(\"profit_factor\",0):.2f}\n'
-                     f'30-day P&L: ₹{r.get(\"total_pnl\",0):,.0f}')
-          requests.post(f'https://api.telegram.org/bot{token}/sendMessage',
-              json={'chat_id': chat, 'text': msg}, timeout=5)
-          "
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: weekly-backtest-${{ github.run_number }}
-          path: reports/backtest_*.json
-          retention-days: 90
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 6: MANUAL PAPER DAY SIMULATOR
-  # ─────────────────────────────────────────────────────────────────────────────
-  paper_day_sim:
-    name: Paper Day Simulator
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'paper_day_sim'
-    env:
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      (github.event_name == 'schedule' && github.event.schedule == '40 9 * * 1-5') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'squareoff')
 
     steps:
       - uses: actions/checkout@v4
@@ -472,23 +194,78 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt -q
-      - run: python scripts/run_paper_day.py --fast
+      - name: Square off all positions
+        run: |
+          python -c "
+          import os, sys
+          sys.path.insert(0, '.')
+          from agents.trade_executor import TradeExecutorAgent
+          ex = TradeExecutorAgent()
+          result = ex.square_off_all()
+          print(f'Square-off: {result}')
+          "
+        continue-on-error: true
+      - name: Notify
+        run: |
+          python -c "
+          import requests, os
+          t = os.environ.get('TELEGRAM_BOT_TOKEN','')
+          c = os.environ.get('TELEGRAM_CHAT_ID','')
+          if t and c:
+              requests.post(f'https://api.telegram.org/bot{t}/sendMessage',
+                  json={'chat_id': c, 'text': '🛑 3:10 PM — Emergency square-off complete. All positions closed.'}, timeout=10)
+          "
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 7: MANUAL HEALTH CHECK
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 4 — EOD REPORT: Tej sends honest daily summary at 3:35 PM IST
+  # ───────────────────────────────────────────────────────────────────────────
+  eod_report:
+    name: EOD Report (3:35 PM IST)
+    runs-on: ubuntu-latest
+    needs: squareoff
+    if: |
+      always() && (
+        (github.event_name == 'schedule' && github.event.schedule == '05 10 * * 1-5') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'eod_report')
+      )
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -q
+      - name: Generate and send EOD report
+        run: |
+          python -c "
+          import os, sys, requests
+          sys.path.insert(0, '.')
+          os.makedirs('db', exist_ok=True)
+          os.makedirs('logs', exist_ok=True)
+          try:
+              from brain.orchestrator import BrainOrchestrator
+              orch = BrainOrchestrator()
+              report = orch.generate_eod_report()
+          except Exception as e:
+              report = f'EOD Report\nError generating full report: {e}\nCheck Zerodha app for P&L.'
+          t = os.environ.get('TELEGRAM_BOT_TOKEN','')
+          c = os.environ.get('TELEGRAM_CHAT_ID','')
+          if t and c:
+              requests.post(f'https://api.telegram.org/bot{t}/sendMessage',
+                  json={'chat_id': c, 'text': report[:4096]}, timeout=15)
+          print(report)
+          "
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 5 — HEALTH CHECK: Verify Tej is ready (run anytime manually)
+  # ───────────────────────────────────────────────────────────────────────────
   healthcheck:
     name: Health Check
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'healthcheck'
-    env:
-      GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-      KITE_API_KEY:       ${{ secrets.KITE_API_KEY }}
-      KITE_API_SECRET:    ${{ secrets.KITE_API_SECRET }}
-      KITE_ACCESS_TOKEN:  ${{ secrets.KITE_ACCESS_TOKEN }}
-      KITE_USER_ID:       ${{ secrets.KITE_USER_ID }}
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'healthcheck'
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -497,3 +274,24 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt -q
       - run: python main.py --healthcheck
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 6 — WEEKLY BACKTEST: Every Monday 7 AM IST
+  # ───────────────────────────────────────────────────────────────────────────
+  weekly_backtest:
+    name: Weekly Backtest (Monday 7 AM IST)
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '30 1 * * 1') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'backtest')
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -q
+      - name: Run weekly backtest
+        run: python main.py --backtest
+        continue-on-error: true
