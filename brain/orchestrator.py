@@ -529,6 +529,76 @@ class BrainOrchestrator:
 
         except Exception as e:
             logger.error(f"End-of-day error: {e}", exc_info=True)
+            # ── FIXED: Never crash silently — always notify ──
+            self._notify(
+                f"⚠️ EOD Report\nError during processing: {e}\n"
+                "Check Zerodha app for P&L."
+            )
+
+    # ──────────────────────────────────────────────────────────────
+    # EOD REPORT — exposed for TelegramCommandBot + /eod command
+    # ──────────────────────────────────────────────────────────────
+
+    def generate_eod_report(self) -> str:
+        """
+        Public method called by TelegramCommandBot when /eod is triggered.
+        Pulls real P&L from Kite + daily summary from risk manager.
+        Returns a Telegram-formatted string.
+        """
+        lines = ["📊 <b>EOD Report</b>\n"]
+
+        # Real P&L from risk manager (always available)
+        try:
+            pnl     = self.risk_mgr.get_today_pnl()
+            summary = self.risk_mgr.get_daily_summary()
+            trades  = summary.get("trades", [])
+            closed  = [t for t in trades if t.get("status") == "CLOSED"]
+            wins    = sum(1 for t in closed if t.get("pnl", 0) > 0)
+            losses  = len(closed) - wins
+
+            sign = "+" if pnl >= 0 else ""
+            lines.append(f"Day P&L   : Rs {sign}{pnl:,.2f}")
+            lines.append(f"Trades    : {len(closed)} closed ({wins}W / {losses}L)")
+
+            if closed:
+                lines.append("\n<b>Trades Today:</b>")
+                for t in closed:
+                    t_pnl = t.get("pnl", 0)
+                    emoji = "✅" if t_pnl >= 0 else "❌"
+                    lines.append(
+                        f"  {emoji} {t.get('symbol','?')} | "
+                        f"Rs {t_pnl:+,.0f} | {t.get('exit_reason','?')}"
+                    )
+        except Exception as e:
+            logger.error(f"generate_eod_report risk_mgr error: {e}")
+            lines.append(f"⚠️ Could not fetch P&L from risk manager: {e}")
+
+        # Open positions (if any remain)
+        try:
+            if self.active_trades:
+                lines.append(f"\n<b>Open Positions:</b> {len(self.active_trades)}")
+                for sym in self.active_trades:
+                    lines.append(f"  ⚡ {sym} — still open")
+        except Exception:
+            pass
+
+        # Capital update
+        try:
+            from config import TRADING
+            pnl_val = self.risk_mgr.get_today_pnl()
+            capital = TRADING.total_capital + pnl_val
+            lines.append(f"\nCapital   : Rs {capital:,.0f}")
+        except Exception:
+            pass
+
+        # Brain intelligence score
+        try:
+            lines.append(f"Intelligence: {self.brain._state.intelligence_score:.0%}")
+        except Exception:
+            pass
+
+        lines.append("\n✅ Check Zerodha app to confirm all orders.")
+        return "\n".join(lines)
 
     # ──────────────────────────────────────────────────────────────
     # WEEKLY EVOLUTION (Sunday 8 PM)
