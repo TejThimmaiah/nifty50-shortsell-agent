@@ -437,6 +437,11 @@ class FreeTickStreamer:
             self._latest_ticks.pop(symbol, None)
         logger.info(f"[FreeStreamer] Unsubscribed: {symbol}")
 
+    def _token_to_symbol(self, token: int) -> Optional[str]:
+        """Reverse lookup: instrument token → symbol name."""
+        from data.nifty50_universe import NIFTY50_TOKENS
+        return NIFTY50_TOKENS.get(token)
+
     def get_ltp(self, symbol: str) -> Optional[float]:
         tick = self._latest_ticks.get(symbol)
         if tick:

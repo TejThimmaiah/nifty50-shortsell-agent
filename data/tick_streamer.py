@@ -35,6 +35,8 @@ __all__ = [
     "free_streamer",
 ]
 
-# Instrument token map kept for any code that references it
-# (tokens are only needed for Kite WS, not for free polling)
-INSTRUMENT_TOKENS: dict = {}
+# Instrument token map — populated from nifty50_universe
+try:
+    from data.nifty50_universe import NIFTY50_TOKENS as INSTRUMENT_TOKENS
+except Exception:
+    INSTRUMENT_TOKENS: dict = {}

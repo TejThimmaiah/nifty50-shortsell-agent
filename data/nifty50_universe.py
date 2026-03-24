@@ -121,3 +121,56 @@ def get_sector(symbol: str) -> str:
 def is_nifty50(symbol: str) -> bool:
     """Check if a symbol is in Nifty 50."""
     return symbol in NIFTY50
+
+
+# ── Instrument token reverse lookup (NSE token → symbol name) ─────────────────
+# Used by FreeTickStreamer._token_to_symbol()
+NIFTY50_TOKENS: dict = {
+    738561:  "RELIANCE",
+    341249:  "TCS",
+    341251:  "HDFCBANK",
+    408065:  "INFY",
+    315394:  "HINDUNILVR",
+    1270529: "ICICIBANK",
+    492033:  "KOTAKBANK",
+    2939649: "LT",
+    779521:  "SBIN",
+    2714625: "BHARTIARTL",
+    60417:   "ASIANPAINT",
+    5633:    "AXISBANK",
+    4268801: "BAJFINANCE",
+    3787521: "WIPRO",
+    2815745: "MARUTI",
+    1330177: "HCLTECH",
+    2952193: "ULTRACEMCO",
+    897537:  "TITAN",
+    2977281: "NTPC",
+    857857:  "SUNPHARMA",
+    2809089: "POWERGRID",
+    4598529: "NESTLEIND",
+    4267265: "BAJAJFINSV",
+    3465729: "TECHM",
+    3505921: "TATASTEEL",
+    225537:  "DRREDDY",
+    2800641: "DIVISLAB",
+    1660673: "HINDALCO",
+    3861249: "ADANIENT",
+    633601:  "ONGC",
+    3001089: "JSWSTEEL",
+    3456768: "TATAMOTORS",
+    315394:  "GRASIM",
+    694978:  "CIPLA",
+    694144:  "COALINDIA",
+    4364289: "BRITANNIA",
+    526849:  "BPCL",
+    232961:  "EICHERMOT",
+    288513:  "MM",
+    119553:  "BAJAJ_AUTO",
+    345089:  "HEROMOTOCO",
+    4662023: "TATACONSUM",
+    4375073: "SBILIFE",
+    4336641: "HDFCLIFE",
+    1510401: "INDUSINDBK",
+    2889473: "UPL",
+    # Additional tokens can be added as discovered
+}
