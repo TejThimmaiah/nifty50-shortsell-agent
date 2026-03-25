@@ -163,6 +163,44 @@ class BrainOrchestrator:
         schedule.every().sunday.at("20:00").do(self._weekly_evolution)
         schedule.every(30).days.do(mkt_calendar.refresh_holidays)
 
+        # ── Startup catch-up: schedule library does NOT backfill missed tasks.
+        # On GitHub Actions the runner often starts after 09:20 IST (slow boot,
+        # cold pip cache).  Fire the missed tasks immediately on startup so the
+        # agent actually trades today instead of silently skipping every check.
+        now_ist = datetime.now(IST)
+        is_trading_day = self._is_market_day()
+        startup_hour   = now_ist.hour * 60 + now_ist.minute  # minutes since midnight
+
+        if is_trading_day:
+            # If we missed the 09:10 circuit-breaker reset, do it now
+            if startup_hour >= 9 * 60 + 10:
+                logger.info(
+                    f"[STARTUP CATCH-UP] Started at {now_ist.strftime('%H:%M')} IST — "
+                    f"09:10 task already passed. Resetting circuit breaker now."
+                )
+                try:
+                    self.breaker.reset_daily()
+                except Exception as _e:
+                    logger.warning(f"Circuit breaker reset on startup failed: {_e}")
+
+            # If we missed the 09:20 morning scan, fire it immediately.
+            # This is the primary cause of zero-trade days on slow runners.
+            if startup_hour >= 9 * 60 + 20 and not self.market_session_active:
+                # Only catch up during viable trading window (before 13:00)
+                if startup_hour < 13 * 60:
+                    logger.info(
+                        f"[STARTUP CATCH-UP] Started at {now_ist.strftime('%H:%M')} IST — "
+                        f"morning scan already past. Firing _morning_scan() immediately."
+                    )
+                    self._morning_scan()
+                else:
+                    logger.info(
+                        f"[STARTUP CATCH-UP] Started at {now_ist.strftime('%H:%M')} IST — "
+                        f"past 13:00, too late for morning scan. Monitoring only."
+                    )
+                    # Still set active so the intraday monitor can close any open positions
+                    self.market_session_active = True
+
         # Main loop
         while True:
             try:
