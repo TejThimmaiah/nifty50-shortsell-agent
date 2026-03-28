@@ -24,7 +24,7 @@ def handle_command(text):
         try:
             import sys; sys.path.insert(0, "."); from intelligence.trade_memory import TradeMemory
             tm = TradeMemory()
-            recent = tm.get_recent(5)
+            recent = tm.get_recent_trades(5) if hasattr(tm, 'get_recent_trades') else []
             msg = "📊 <b>Recent Trades</b>\n"
             for t in recent:
                 msg += f"• {t.get('symbol','?')} {t.get('pnl',0):+.0f}\n"
