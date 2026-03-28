@@ -277,6 +277,7 @@ class TradeExecutorAgent:
                 product=self._kite.PRODUCT_MIS,
                 order_type=self._kite.ORDER_TYPE_MARKET,
                 variety=self._kite.VARIETY_REGULAR,
+            market_protection=0.05,
             )
             logger.info(f"✅ Entry order placed: {entry_order_id} | {symbol} SHORT {quantity} @ MARKET")
             time.sleep(1)   # Give exchange 1 second to process entry
@@ -348,6 +349,7 @@ class TradeExecutorAgent:
                 product=self._kite.PRODUCT_MIS,
                 order_type=self._kite.ORDER_TYPE_MARKET,
                 variety=self._kite.VARIETY_REGULAR,
+            market_protection=0.05,
             )
             return {"status": "COVERED", "symbol": symbol, "order_id": order_id, "paper": False}
         except Exception as e:
