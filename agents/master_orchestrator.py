@@ -21,19 +21,95 @@ def send_telegram(msg):
         logger.error(f"Telegram error: {e}")
 
 def get_kite():
-    """Return authenticated Kite instance using saved access token."""
+    """Return authenticated Kite instance - tries token file, env var, then live login."""
     try:
         from kiteconnect import KiteConnect
         api_key = os.environ.get("KITE_API_KEY", "")
+        if not api_key:
+            return None, "❌ KITE_API_KEY not set in .env"
+
+        # Try 1: token file (written by morning prep if run locally)
         token_file = os.path.join(os.getcwd(), "kite_access_token.txt")
-        if not os.path.exists(token_file):
-            return None, "❌ No access token file found. Run morning prep first."
-        access_token = open(token_file).read().strip()
+        access_token = None
+        if os.path.exists(token_file):
+            candidate = open(token_file).read().strip()
+            if candidate:
+                access_token = candidate
+
+        # Try 2: env var KITE_ACCESS_TOKEN
+        if not access_token:
+            access_token = os.environ.get("KITE_ACCESS_TOKEN", "").strip()
+
+        # Try 3: live login using credentials from .env
+        if not access_token:
+            access_token = live_kite_login(api_key)
+            if access_token:
+                # Cache it for the rest of the day
+                open(token_file, "w").write(access_token)
+
+        if not access_token:
+            return None, "❌ Could not obtain Kite access token. Check credentials in .env"
+
         kite = KiteConnect(api_key=api_key)
         kite.set_access_token(access_token)
+        # Quick validation
+        kite.profile()
         return kite, None
     except Exception as e:
-        return None, f"❌ Kite init error: {e}"
+        return None, f"❌ Kite error: {e}"
+
+
+def live_kite_login(api_key):
+    """Auto-login to Kite using stored credentials and TOTP."""
+    try:
+        import pyotp
+        from selenium import webdriver
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.chrome.options import Options
+        from kiteconnect import KiteConnect
+        import time as _time
+
+        user_id    = os.environ.get("KITE_USER_ID", "")
+        password   = os.environ.get("KITE_PASSWORD", "")
+        totp_secret= os.environ.get("KITE_TOTP_SECRET", "")
+        api_secret = os.environ.get("KITE_API_SECRET", "")
+        if not all([user_id, password, totp_secret, api_secret]):
+            return None
+
+        opts = Options()
+        opts.add_argument("--headless")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        driver = webdriver.Chrome(options=opts)
+
+        kite = KiteConnect(api_key=api_key)
+        driver.get(kite.login_url())
+        _time.sleep(2)
+
+        driver.find_element(By.ID, "userid").send_keys(user_id)
+        driver.find_element(By.ID, "password").send_keys(password)
+        driver.find_element(By.XPATH, "//button[@type=\'submit\']").click()
+        _time.sleep(2)
+
+        totp = pyotp.TOTP(totp_secret).now()
+        driver.find_element(By.XPATH, "//input[@label=\'External TOTP\' or @type=\'number\']").send_keys(totp)
+        _time.sleep(3)
+
+        url = driver.current_url
+        driver.quit()
+
+        from urllib.parse import urlparse, parse_qs
+        params = parse_qs(urlparse(url).query)
+        request_token = params.get("request_token", [None])[0]
+        if not request_token:
+            return None
+
+        data = kite.generate_session(request_token, api_secret=api_secret)
+        return data["access_token"]
+    except Exception as e:
+        logger.error(f"Live login failed: {e}")
+        return None
+
 
 def fetch_capital():
     kite, err = get_kite()
