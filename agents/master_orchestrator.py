@@ -1,58 +1,68 @@
-import os, requests, threading, time, logging
+import os, sys, time, logging, threading, requests
 from datetime import datetime
 import pytz
 
-logger = logging.getLogger(__name__)
-IST = pytz.timezone('Asia/Kolkata')
+# Fix working directory so imports resolve
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.getcwd())
 
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+IST = pytz.timezone("Asia/Kolkata")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+logger = logging.getLogger(__name__)
 
 def send_telegram(msg):
     try:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+                      json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
     except Exception as e:
         logger.error(f"Telegram error: {e}")
 
-def handle_command(text):
-    text = text.strip()
-    tl = text.lower()
-    if tl == '/status':
-        now = datetime.now(IST).strftime('%H:%M:%S IST')
-        send_telegram(f"🤖 <b>Tej Status</b>\n⏰ {now}\n✅ Agent running on GCP\n📍 IP: 35.222.173.227\n💹 Mode: LIVE SHORT-ONLY")
-    elif tl == '/pnl':
-        send_telegram("📊 No trades yet — first trade day is Monday 9:20 AM IST!")
-    elif tl.startswith('/research '):
-        query = text[10:]
-        send_telegram(f"🔍 Researching: {query}...")
-        threading.Thread(target=research_and_reply, args=(query,), daemon=True).start()
-    elif tl.startswith('/code'):
-        from agents.code_agent import handle_code_command
-        handle_code_command(tl)
-    elif tl == '/help':
-        send_telegram("🤖 <b>Tej Commands</b>\n/status - Agent status\n/pnl - Recent trades\n/research &lt;query&gt; - Web research\n/code help - Code agent\n/help - This menu")
-    else:
-        send_telegram(f"❓ Unknown command. Type /help for options.")
+def handle_code_command(text):
+    """Handle /code commands - stub if code_agent not available"""
+    try:
+        from agents.code_agent import handle_code_command as _hcc
+        _hcc(text)
+    except ImportError:
+        send_telegram("⚠️ Code agent not available. Check agents/code_agent.py exists.")
+    except Exception as e:
+        send_telegram(f"⚠️ Code agent error: {e}")
 
 def research_and_reply(query):
     try:
         from duckduckgo_search import DDGS
-        from groq import Groq
-        results = []
         with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=5):
-                results.append(f"{r['title']}: {r['body'][:200]}")
-        context = "\n".join(results)
-        client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+            results = list(ddgs.text(query, max_results=3))
+        context = "\n".join([r.get("body","") for r in results])
+        import groq
+        client = groq.Groq(api_key=os.environ.get("GROQ_API_KEY",""))
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": f"Summarise in 3 bullet points for Indian stock trader:\nQuery: {query}\nResults:\n{context}"}],
+            messages=[{"role":"user","content":f"Summarise in 3 bullet points for Indian stock trader:\nQuery: {query}\nResults:\n{context}"}],
             max_tokens=300
         )
         send_telegram(f"🔍 <b>Research: {query}</b>\n\n{resp.choices[0].message.content}")
     except Exception as e:
         send_telegram(f"⚠️ Research error: {e}")
+
+def handle_command(text):
+    text = text.strip()
+    tl = text.lower()
+    now = datetime.now(IST).strftime('%H:%M:%S IST')
+    if tl == '/status':
+        send_telegram(f"🤖 <b>Tej Status</b>\n🕐 {now}\n✅ Agent running on GCP\n📍 IP: 35.222.173.227\n🟢 Mode: LIVE SHORT-ONLY")
+    elif tl == '/pnl':
+        send_telegram("📊 No trades yet — first trade day is Monday 9:20 AM IST!")
+    elif tl == '/help':
+        send_telegram("📋 <b>Commands:</b>\n/status — Agent status\n/pnl — Today's P&L\n/research [query] — Market research\n/code [cmd] — Code agent\n/help — This menu")
+    elif tl.startswith('/research '):
+        query = text[10:]
+        send_telegram(f"🔵 Researching: {query}...")
+        threading.Thread(target=research_and_reply, args=(query,), daemon=True).start()
+    elif tl.startswith('/code'):
+        handle_code_command(text)
+    else:
+        send_telegram(f"❓ Unknown command: {text}\nType /help for available commands.")
 
 def morning_briefing():
     while True:
