@@ -62,37 +62,51 @@ def get_kite():
 def live_kite_login(api_key):
     """Auto-login to Kite using stored credentials and TOTP."""
     try:
-        import pyotp
+        import pyotp, time as _time
         from selenium import webdriver
         from selenium.webdriver.common.by import By
         from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
         from kiteconnect import KiteConnect
-        import time as _time
 
-        user_id    = os.environ.get("KITE_USER_ID", "")
-        password   = os.environ.get("KITE_PASSWORD", "")
-        totp_secret= os.environ.get("KITE_TOTP_SECRET", "")
-        api_secret = os.environ.get("KITE_API_SECRET", "")
+        user_id     = os.environ.get("KITE_USER_ID", "")
+        password    = os.environ.get("KITE_PASSWORD", "")
+        totp_secret = os.environ.get("KITE_TOTP_SECRET", "")
+        api_secret  = os.environ.get("KITE_API_SECRET", "")
         if not all([user_id, password, totp_secret, api_secret]):
+            logger.error("Missing Kite credentials in .env")
             return None
 
         opts = Options()
-        opts.add_argument("--headless")
+        opts.add_argument("--headless=new")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
-        driver = webdriver.Chrome(options=opts)
+        opts.add_argument("--disable-gpu")
+        opts.add_argument("--window-size=1280,800")
+        opts.binary_location = "/usr/bin/chromium-browser"
+
+        svc = Service("/usr/bin/chromedriver")
+        driver = webdriver.Chrome(service=svc, options=opts)
+        wait = WebDriverWait(driver, 15)
 
         kite = KiteConnect(api_key=api_key)
         driver.get(kite.login_url())
-        _time.sleep(2)
 
-        driver.find_element(By.ID, "userid").send_keys(user_id)
+        # Enter user ID
+        wait.until(EC.presence_of_element_located((By.ID, "userid"))).send_keys(user_id)
         driver.find_element(By.ID, "password").send_keys(password)
-        driver.find_element(By.XPATH, "//button[@type=\'submit\']").click()
-        _time.sleep(2)
+        driver.find_element(By.XPATH, "//button[@type='submit']").click()
 
+        # Enter TOTP
+        _time.sleep(2)
         totp = pyotp.TOTP(totp_secret).now()
-        driver.find_element(By.XPATH, "//input[@label=\'External TOTP\' or @type=\'number\']").send_keys(totp)
+        totp_field = wait.until(EC.presence_of_element_located(
+            (By.XPATH, "//input[@type='number' or @inputmode='numeric' or contains(@placeholder,'TOTP') or contains(@placeholder,'OTP')]")
+        ))
+        totp_field.clear()
+        totp_field.send_keys(totp)
         _time.sleep(3)
 
         url = driver.current_url
@@ -102,10 +116,13 @@ def live_kite_login(api_key):
         params = parse_qs(urlparse(url).query)
         request_token = params.get("request_token", [None])[0]
         if not request_token:
+            logger.error(f"No request_token in URL: {url[:200]}")
             return None
 
         data = kite.generate_session(request_token, api_secret=api_secret)
-        return data["access_token"]
+        token = data["access_token"]
+        logger.info(f"Live login success: {token[:12]}...")
+        return token
     except Exception as e:
         logger.error(f"Live login failed: {e}")
         return None
