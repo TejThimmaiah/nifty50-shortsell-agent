@@ -37,6 +37,8 @@ def handle_command(text):
         threading.Thread(target=research_and_reply, args=(query,), daemon=True).start()
     elif text == '/help':
         send_telegram("🤖 <b>Tej Commands</b>\n/status - Agent status\n/pnl - Recent trades\n/research <query> - Web research\n/help - This menu")
+    elif text.startswith('/code'):
+        handle_code_command(text)
     else:
         send_telegram(f"❓ Unknown command. Type /help for options.")
 
@@ -94,3 +96,5 @@ def start():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     start()
+
+from agents.code_agent import handle_code_command
