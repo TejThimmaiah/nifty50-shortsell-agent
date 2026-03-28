@@ -1,10 +1,12 @@
 import os, sys, time, logging, threading, requests
 from datetime import datetime
 import pytz
+from dotenv import load_dotenv
 
 # Fix working directory so imports resolve
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.getcwd())
+load_dotenv()
 
 IST = pytz.timezone("Asia/Kolkata")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -18,8 +20,42 @@ def send_telegram(msg):
     except Exception as e:
         logger.error(f"Telegram error: {e}")
 
+def get_kite():
+    """Return authenticated Kite instance using saved access token."""
+    try:
+        from kiteconnect import KiteConnect
+        api_key = os.environ.get("KITE_API_KEY", "")
+        token_file = os.path.join(os.getcwd(), "kite_access_token.txt")
+        if not os.path.exists(token_file):
+            return None, "❌ No access token file found. Run morning prep first."
+        access_token = open(token_file).read().strip()
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(access_token)
+        return kite, None
+    except Exception as e:
+        return None, f"❌ Kite init error: {e}"
+
+def fetch_capital():
+    kite, err = get_kite()
+    if err:
+        send_telegram(err)
+        return
+    try:
+        margins = kite.margins(segment="equity")
+        available = margins.get("net", margins.get("available", {}).get("live_balance", 0))
+        used = margins.get("utilised", {}).get("debits", 0)
+        total = margins.get("available", {}).get("opening_balance", available)
+        send_telegram(
+            f"💰 <b>Zerodha Account Balance</b>\n\n"
+            f"✅ Available: ₹{available:,.2f}\n"
+            f"📊 Used Margin: ₹{used:,.2f}\n"
+            f"🏦 Opening Balance: ₹{total:,.2f}\n\n"
+            f"🎯 Mode: LIVE SHORT-ONLY MIS"
+        )
+    except Exception as e:
+        send_telegram(f"⚠️ Could not fetch capital: {e}")
+
 def handle_code_command(text):
-    """Handle /code commands - stub if code_agent not available"""
     try:
         from agents.code_agent import handle_code_command as _hcc
         _hcc(text)
@@ -50,11 +86,29 @@ def handle_command(text):
     tl = text.lower()
     now = datetime.now(IST).strftime('%H:%M:%S IST')
     if tl == '/status':
-        send_telegram(f"🤖 <b>Tej Status</b>\n🕐 {now}\n✅ Agent running on GCP\n📍 IP: 35.222.173.227\n🟢 Mode: LIVE SHORT-ONLY")
+        send_telegram(
+            f"🤖 <b>Tej Status</b>\n"
+            f"🕐 {now}\n"
+            f"✅ Agent running on GCP\n"
+            f"📍 IP: 35.222.173.227\n"
+            f"🟢 Mode: LIVE SHORT-ONLY"
+        )
     elif tl == '/pnl':
         send_telegram("📊 No trades yet — first trade day is Monday 9:20 AM IST!")
+    elif tl in ('/capital', '/funds', '/balance'):
+        send_telegram("🔄 Fetching live balance from Zerodha...")
+        threading.Thread(target=fetch_capital, daemon=True).start()
     elif tl == '/help':
-        send_telegram("📋 <b>Commands:</b>\n/status — Agent status\n/pnl — Today's P&L\n/research [query] — Market research\n/code [cmd] — Code agent\n/help — This menu")
+        send_telegram(
+            "📋 <b>Tej Commands:</b>\n\n"
+            "/status — Agent status & IP\n"
+            "/capital — Live Zerodha balance\n"
+            "/funds — Same as /capital\n"
+            "/pnl — Today's P&L\n"
+            "/research [query] — Market research\n"
+            "/code [cmd] — Code agent\n"
+            "/help — This menu"
+        )
     elif tl.startswith('/research '):
         query = text[10:]
         send_telegram(f"🔵 Researching: {query}...")
@@ -62,13 +116,20 @@ def handle_command(text):
     elif tl.startswith('/code'):
         handle_code_command(text)
     else:
-        send_telegram(f"❓ Unknown command: {text}\nType /help for available commands.")
+        send_telegram(f"❓ Unknown command: <code>{text}</code>\nType /help for available commands.")
 
 def morning_briefing():
     while True:
         now = datetime.now(IST)
         if now.weekday() < 5 and now.hour == 8 and now.minute == 30:
-            send_telegram("🌅 <b>Good Morning! Trading Day Briefing</b>\n\n⏰ Market opens in 50 mins\n📋 Tej scans Nifty50 at 9:20 AM\n🎯 Strategy: SHORT-ONLY MIS\n💰 IP: 35.222.173.227 ✅ SEBI Compliant\n\nType /help for commands")
+            send_telegram(
+                "🌅 <b>Good Morning! Trading Day Briefing</b>\n\n"
+                "⏰ Market opens in 50 mins\n"
+                "📋 Tej scans Nifty50 at 9:20 AM\n"
+                "🎯 Strategy: SHORT-ONLY MIS\n"
+                "💰 IP: 35.222.173.227 ✅ SEBI Compliant\n\n"
+                "Type /capital to check your balance\nType /help for commands"
+            )
             time.sleep(60)
         time.sleep(30)
 
