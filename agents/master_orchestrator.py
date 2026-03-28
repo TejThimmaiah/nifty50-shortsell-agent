@@ -22,7 +22,7 @@ def handle_command(text):
         send_telegram(f"🤖 <b>Tej Status</b>\n⏰ {now}\n✅ Agent running on GCP\n📍 IP: 35.222.173.227\n💹 Mode: LIVE SHORT-ONLY")
     elif text == '/pnl':
         try:
-            from intelligence.trade_memory import TradeMemory
+            import sys; sys.path.insert(0, "."); from intelligence.trade_memory import TradeMemory
             tm = TradeMemory()
             recent = tm.get_recent(5)
             msg = "📊 <b>Recent Trades</b>\n"
