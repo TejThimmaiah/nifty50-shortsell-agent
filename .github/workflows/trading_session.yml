@@ -198,6 +198,23 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt -q
+    - name: Download Kite token for squareoff
+      uses: actions/download-artifact@v4
+      with:
+        name: kite-token-${{ github.run_number }}
+        path: /tmp/tej
+      continue-on-error: true
+    - name: Load Kite token for squareoff
+      run: |
+        if [ -f /tmp/tej/token.env ]; then
+          TOKEN=$(grep "^KITE_ACCESS_TOKEN=" /tmp/tej/token.env | cut -d= -f2 | tr -d '[:space:]')
+          if [ -n "$TOKEN" ]; then
+            echo "KITE_ACCESS_TOKEN=$TOKEN" >> $GITHUB_ENV
+            echo "✅ Token loaded for squareoff: ${TOKEN:0:10}..."
+          fi
+        else
+          echo "⚠️ No token artifact — using secret fallback"
+        fi
       - name: Square off all positions
         run: |
           python -c "
