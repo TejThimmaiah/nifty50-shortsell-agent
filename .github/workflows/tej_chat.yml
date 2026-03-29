@@ -1,11 +1,7 @@
 name: Tej — 24/7 Autonomous Chat
 
+# DISABLED: Replaced by GCP orchestrator
 on:
-  schedule:
-    - cron: "30 18 * * *"   # 12:00 AM IST
-    - cron: "30 0 * * *"    # 6:00 AM IST
-    - cron: "15 10 * * 1-5" # 3:45 PM IST (after market)
-    - cron: "30 15 * * *"   # 9:00 PM IST
   workflow_dispatch:
 
 env:

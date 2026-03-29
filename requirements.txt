@@ -60,3 +60,8 @@ matplotlib>=3.7.0           # Chart rendering for chart vision
 gtts>=2.5.0                 # Google TTS fallback
 selenium
 webdriver-manager
+
+# Search & Market Data
+googlesearch-python
+tradingview-screener
+# tvDatafeed installed from git: pip install git+https://github.com/rongardF/tvdatafeed.git

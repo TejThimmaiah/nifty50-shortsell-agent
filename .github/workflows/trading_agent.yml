@@ -94,7 +94,7 @@ jobs:
         continue-on-error: true
 
   deploy:
-    name: Deploy to Oracle Cloud
+    name: Deploy to GCP
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -102,23 +102,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: appleboy/ssh-action@v1.0.3
         with:
-          host:     ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key:      ${{ secrets.ORACLE_SSH_KEY }}
+          host:     ${{ secrets.GCP_HOST }}
+          username: ${{ secrets.GCP_USER }}
+          key:      ${{ secrets.GCP_SSH_KEY }}
           port:     22
           timeout:  60s
           script: |
-            cd ~/finance-agent
+            cd ~/nifty50-shortsell-agent
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt -q
-            sudo systemctl restart finance-agent.service
-            sudo systemctl is-active --quiet finance-agent.service && echo "Service OK" || echo "Service FAILED"
+            sudo systemctl restart tej-orchestrator
+            sudo systemctl is-active --quiet tej-orchestrator && echo "Orchestrator OK" || echo "Orchestrator FAILED"
       - name: Notify Telegram
         if: always()
         run: |
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 Deploy ${{ job.status }} — #${{ github.run_number }}" || true
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 GCP Deploy ${{ job.status }} — #${{ github.run_number }}" || true
 
   deploy-cloudflare:
     name: Deploy Cloudflare Worker
