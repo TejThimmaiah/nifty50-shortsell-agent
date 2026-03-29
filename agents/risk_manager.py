@@ -32,6 +32,7 @@ class RiskManagerAgent:
 
     def __init__(self, capital: float = None):
         self.capital = capital or TRADING.total_capital
+        import config as _cfg; self._db_path = _cfg.DB_PATH
         self._init_db()
 
     # ──────────────────────────────────────────────────────────────
@@ -155,7 +156,7 @@ class RiskManagerAgent:
         order_id: str = "",
     ):
         """Record a new open trade."""
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(__import__('config').DB_PATH) as conn:
             conn.execute("""
                 INSERT INTO trades (symbol, direction, entry_price, quantity, order_id, status, trade_date)
                 VALUES (?, ?, ?, ?, ?, 'OPEN', ?)
@@ -169,7 +170,7 @@ class RiskManagerAgent:
         order_id: str = "",
     ) -> float:
         """Mark trade as closed and compute P&L."""
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(__import__('config').DB_PATH) as conn:
             row = conn.execute("""
                 SELECT id, direction, entry_price, quantity
                 FROM trades WHERE symbol=? AND status='OPEN' ORDER BY id DESC LIMIT 1
@@ -195,7 +196,7 @@ class RiskManagerAgent:
 
     def get_today_pnl(self) -> float:
         """Get total P&L for today (closed trades only)."""
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(__import__('config').DB_PATH) as conn:
             row = conn.execute("""
                 SELECT COALESCE(SUM(pnl), 0) FROM trades
                 WHERE trade_date=? AND status='CLOSED'
@@ -204,7 +205,7 @@ class RiskManagerAgent:
 
     def get_open_position_count(self) -> int:
         """Count currently open positions."""
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(__import__('config').DB_PATH) as conn:
             row = conn.execute("""
                 SELECT COUNT(*) FROM trades
                 WHERE trade_date=? AND status='OPEN'
@@ -213,7 +214,7 @@ class RiskManagerAgent:
 
     def get_daily_summary(self) -> dict:
         """Get end-of-day P&L summary."""
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(__import__('config').DB_PATH) as conn:
             rows = conn.execute("""
                 SELECT symbol, direction, entry_price, exit_price, quantity, pnl, status
                 FROM trades WHERE trade_date=?
@@ -247,7 +248,7 @@ class RiskManagerAgent:
         """Create trade database if it doesn't exist."""
         import os
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(__import__('config').DB_PATH) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

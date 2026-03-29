@@ -91,10 +91,14 @@ class MultiTimeframeAnalyser:
         composite = min(1.0, base_conf + alignment_bonus.get(len(alignments), 0))
 
         # Candlestick pattern bonus
+        def _safe_pcs(df):
+            if df is None or (hasattr(df, 'empty') and df.empty):
+                return 0.0
+            return pattern_confidence_score(df)
         pattern_score = (
-            pattern_confidence_score(df_5m or pd.DataFrame()) * 0.25 +
-            pattern_confidence_score(df_15m or pd.DataFrame()) * 0.35 +
-            pattern_confidence_score(df_1d or pd.DataFrame()) * 0.40
+            _safe_pcs(df_5m) * 0.25 +
+            _safe_pcs(df_15m) * 0.35 +
+            _safe_pcs(df_1d) * 0.40
         )
         composite = min(1.0, composite + pattern_score * 0.15)
 
