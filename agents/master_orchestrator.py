@@ -148,6 +148,46 @@ def fetch_capital():
     except Exception as e:
         send_telegram(f"⚠️ Could not fetch capital: {e}")
 
+
+def fetch_pnl():
+    """Fetch today's real P&L from Zerodha."""
+    kite, err = get_kite()
+    if err:
+        send_telegram(err)
+        return
+    try:
+        # Get today's orders
+        orders = kite.orders()
+        today = __import__('datetime').date.today().isoformat()
+        today_orders = [o for o in orders if o.get("order_timestamp","").startswith(today)]
+
+        # Get positions P&L
+        positions = kite.positions()
+        day_pos = positions.get("day", [])
+
+        total_pnl = sum(p.get("pnl", 0) for p in day_pos)
+        total_trades = len([o for o in today_orders if o.get("status") == "COMPLETE"])
+        open_pos = [p for p in day_pos if p.get("quantity", 0) != 0]
+
+        lines = ["📊 <b>Tej P&L Report</b>\n"]
+        lines.append(f"📅 Date: {today}")
+        lines.append(f"💰 Day P&L: ₹{total_pnl:+,.2f}")
+        lines.append(f"🔢 Completed trades: {total_trades}")
+
+        if open_pos:
+            lines.append(f"\n⚠️ Open positions ({len(open_pos)}):")
+            for p in open_pos:
+                lines.append(f"  {p['tradingsymbol']}: qty={p['quantity']} | P&L=₹{p.get('pnl',0):+,.2f}")
+        else:
+            lines.append("\n✅ No open positions")
+
+        if total_trades == 0 and not open_pos:
+            lines.append("\n📋 No trades executed today yet.")
+
+        send_telegram("\n".join(lines))
+    except Exception as e:
+        send_telegram(f"⚠️ P&L fetch error: {e}")
+
 def handle_code_command(text):
     try:
         from agents.code_agent import handle_code_command as _hcc
@@ -187,7 +227,8 @@ def handle_command(text):
             f"🟢 Mode: LIVE SHORT-ONLY"
         )
     elif tl == '/pnl':
-        send_telegram("📊 No trades yet — first trade day is Monday 9:20 AM IST!")
+        send_telegram("🔄 Fetching today's P&L from Zerodha...")
+        threading.Thread(target=fetch_pnl, daemon=True).start()
     elif tl in ('/capital', '/funds', '/balance'):
         send_telegram("🔄 Fetching live balance from Zerodha...")
         threading.Thread(target=fetch_capital, daemon=True).start()
