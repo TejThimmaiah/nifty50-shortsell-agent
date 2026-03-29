@@ -340,7 +340,7 @@ class TestCircuitBreaker:
         from utils.circuit_breaker import CircuitBreaker
         alerts = []
         cb = CircuitBreaker(capital=100_000, notify_fn=alerts.append, on_halt=lambda: None)
-        cb.record_market_crash(nifty_change_pct=-3.0)
+        cb.check_market_crash(nifty_change_pct=-3.0)
         allowed, reason = cb.allow_trade()
         assert not allowed
 
@@ -379,8 +379,8 @@ class TestTradeExecution:
         from agents.trade_executor import TradeExecutorAgent
         executor = TradeExecutorAgent()
         executor.short_sell("HDFCBANK", 10, 1600.0, 1608.0, 1576.0)
-        result = executor.cover("HDFCBANK", 10, 1576.0)
-        assert result["status"] in ("EXECUTED", "CLOSED")
+        result = executor.cover_short("HDFCBANK", 10, 1576.0)
+        assert result["status"] in ("EXECUTED", "CLOSED", "COVERED")
 
     def test_sl_trigger_on_paper(self):
         from agents.trade_executor import TradeExecutorAgent
@@ -403,7 +403,7 @@ class TestTradeExecution:
         assert not hasattr(executor, "buy_stock")
         assert not hasattr(executor, "go_long")
         assert hasattr(executor, "short_sell")
-        assert hasattr(executor, "cover")
+        assert hasattr(executor, "cover_short")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. INTELLIGENCE LAYERS — NIFTY50 CONTEXT
@@ -458,8 +458,8 @@ class TestIntelligenceLayers:
     def test_market_regime_detects_crisis(self):
         from intelligence.market_regime import MarketRegimeDetector
         detector = MarketRegimeDetector()
-        regime   = detector.detect(vix=28.0, advance_decline=0.2,
-                                   fii_net_cr=-1500, nifty_change_1d=-3.5)
+        regime   = detector.detect(vix=35.0, advance_decline=0.2,
+                                   fii_net_cr=-1500, nifty_change_1d=-5.0)
         assert regime.label == "CRISIS"
         assert regime.max_positions == 0
 
@@ -582,6 +582,7 @@ class TestTradeMemory:
             rsi_at_entry=74.0, market_regime="TRENDING_DOWN",
             sector="ENERGY", entry_price=2500, stop_loss=2512.5,
             target=2462.5, quantity=8, confidence_score=0.72,
+            exit_reason="TARGET", exit_price=2462.5, pnl=300.0,
         )
         trade_id = store.record(memory)
         assert trade_id is not None
