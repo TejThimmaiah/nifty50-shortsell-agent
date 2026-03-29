@@ -58,3 +58,5 @@ redis>=5.0.0                # Working memory (optional — falls back to dict)
 shap>=0.44.0                # Explainable AI (optional)
 matplotlib>=3.7.0           # Chart rendering for chart vision
 gtts>=2.5.0                 # Google TTS fallback
+selenium
+webdriver-manager
