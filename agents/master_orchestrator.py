@@ -54,42 +54,60 @@ def web_search(query, max_results=5):
 
 # ── AI: Groq → Gemini → OpenRouter → HuggingFace ────────────
 def ai_think(prompt, system="You are Tej, a helpful AI assistant. Be concise.", max_tokens=500):
-    # Try Groq (fastest)
-    try:
-        gk = os.environ.get("GROQ_API_KEY","")
-        if gk:
-            import groq
-            r = groq.Groq(api_key=gk).chat.completions.create(model="llama-3.3-70b-versatile",
-                messages=[{"role":"system","content":system},{"role":"user","content":prompt}], max_tokens=max_tokens)
-            return r.choices[0].message.content
-    except Exception as e: logger.warning(f"Groq failed: {e}")
-    # Try Gemini
-    try:
-        gk = os.environ.get("GEMINI_API_KEY","")
-        if gk:
-            r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gk}",
-                json={"contents":[{"parts":[{"text":f"{system}\n\n{prompt}"}]}]}, timeout=30)
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e: logger.warning(f"Gemini failed: {e}")
-    # Try OpenRouter
-    try:
-        ok = os.environ.get("OPENROUTER_API_KEY","")
-        if ok:
-            r = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {ok}"},
-                json={"model":"meta-llama/llama-3.3-70b-instruct:free","messages":[{"role":"system","content":system},{"role":"user","content":prompt}],"max_tokens":max_tokens}, timeout=30)
-            return r.json()["choices"][0]["message"]["content"]
-    except Exception as e: logger.warning(f"OpenRouter failed: {e}")
-    # Try HuggingFace
-    try:
-        hk = os.environ.get("HF_API_KEY","")
-        if hk:
-            r = requests.post("https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
-                headers={"Authorization": f"Bearer {hk}"},
-                json={"inputs": f"<s>[INST] {system}\n{prompt} [/INST]", "parameters":{"max_new_tokens":max_tokens}}, timeout=30)
-            return r.json()[0]["generated_text"].split("[/INST]")[-1].strip()
-    except Exception as e: logger.warning(f"HF failed: {e}")
-    return "All AI engines are unavailable right now. Try again later."
+    engines = [
+        ("Groq", lambda: _try_groq(prompt, system, max_tokens)),
+        ("Gemini", lambda: _try_gemini(prompt, system, max_tokens)),
+        ("xAI Grok", lambda: _try_xai(prompt, system, max_tokens)),
+        ("DeepSeek", lambda: _try_openrouter(prompt, system, max_tokens, "deepseek/deepseek-chat-v3-0324:free")),
+        ("Qwen", lambda: _try_openrouter(prompt, system, max_tokens, "qwen/qwen3-235b-a22b:free")),
+        ("HuggingFace", lambda: _try_hf(prompt, system, max_tokens)),
+    ]
+    for name, fn in engines:
+        try:
+            result = fn()
+            if result: return result
+        except Exception as e:
+            logger.warning(f"{name} failed: {e}")
+    return "All 6 AI engines unavailable. Try again later."
+
+def _try_groq(prompt, system, max_tokens):
+    gk = os.environ.get("GROQ_API_KEY","")
+    if not gk: return None
+    import groq
+    r = groq.Groq(api_key=gk).chat.completions.create(model="llama-3.3-70b-versatile",
+        messages=[{"role":"system","content":system},{"role":"user","content":prompt}], max_tokens=max_tokens)
+    return r.choices[0].message.content
+
+def _try_gemini(prompt, system, max_tokens):
+    gk = os.environ.get("GEMINI_API_KEY","")
+    if not gk: return None
+    r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gk}",
+        json={"contents":[{"parts":[{"text":f"{system}\n\n{prompt}"}]}]}, timeout=30)
+    return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+def _try_xai(prompt, system, max_tokens):
+    xk = os.environ.get("XAI_API_KEY","")
+    if not xk: return None
+    r = requests.post("https://api.x.ai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {xk}", "Content-Type": "application/json"},
+        json={"model":"grok-3-mini-fast","messages":[{"role":"system","content":system},{"role":"user","content":prompt}],"max_tokens":max_tokens}, timeout=30)
+    return r.json()["choices"][0]["message"]["content"]
+
+def _try_openrouter(prompt, system, max_tokens, model):
+    ok = os.environ.get("OPENROUTER_API_KEY","")
+    if not ok: return None
+    r = requests.post("https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {ok}"},
+        json={"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":prompt}],"max_tokens":max_tokens}, timeout=30)
+    return r.json()["choices"][0]["message"]["content"]
+
+def _try_hf(prompt, system, max_tokens):
+    hk = os.environ.get("HF_API_KEY","")
+    if not hk: return None
+    r = requests.post("https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
+        headers={"Authorization": f"Bearer {hk}"},
+        json={"inputs": f"<s>[INST] {system}\n{prompt} [/INST]", "parameters":{"max_new_tokens":max_tokens}}, timeout=30)
+    return r.json()[0]["generated_text"].split("[/INST]")[-1].strip()
 
 # ── MARKET DATA ──────────────────────────────────────────────
 def get_stock_yahoo(symbol):
@@ -290,7 +308,7 @@ def ai_respond(text):
             search_ctx = "\n".join([r.get("body","") for r in results])
     except: pass
     prompt = text + (f"\n\n[Search results]\n{search_ctx}" if search_ctx else "")
-    system = "You are Tej, an AI assistant that can do ANYTHING: answer questions, write code, build websites, plan businesses, analyze markets. Be direct and helpful. Under 300 words. NEVER claim to execute trades."
+    system = "You are Tej, an elite AI developer and assistant with 6 AI engines. You write production-ready code with error handling, logging, and tests. You build SEO-optimized websites with meta tags, OG, sitemap, robots.txt. You plan businesses, analyze markets, create reports. Always give COMPLETE output, never snippets. NEVER claim to execute trades from chat."
     reply = ai_think(prompt, system=system, max_tokens=600)
     send_telegram(reply)
 
@@ -304,11 +322,11 @@ def handle_command(text):
     text = text.strip(); tl = text.lower()
     now = datetime.now(IST).strftime('%H:%M IST')
     if tl=='/status':
-        send_telegram(f"🤖 <b>Tej v3.0</b>\n🕐 {now}\n✅ GCP Live\n\n🧠 AI: Groq→Gemini→OpenRouter→HF\n🔍 Search: Tavily→Google→DDG\n📊 Data: TradingView+Yahoo+Finnhub\n💰 Trading: Zerodha Kite")
+        send_telegram(f"🤖 <b>Tej v3.1</b>\n🕐 {now}\n✅ GCP Live\n\n🧠 AI: Groq→Gemini→Grok→DeepSeek→Qwen→HF\n🔍 Search: Tavily→Google→DDG\n📊 Data: TradingView+Yahoo+Finnhub\n💰 Trading: Zerodha Kite")
     elif tl=='/pnl': send_telegram("🔄..."); threading.Thread(target=fetch_pnl,daemon=True).start()
     elif tl in('/capital','/funds','/balance'): send_telegram("🔄..."); threading.Thread(target=fetch_capital,daemon=True).start()
     elif tl=='/help':
-        send_telegram("📋 <b>Tej v3.0</b>\n\n<b>💰 Trading</b>\n/capital /pnl /status\n\n<b>📊 Live Data</b>\n/nifty — Index + movers\n/price SYMBOL — Full stock data\n/scan — Short screener\n\n<b>📰 News &amp; Research</b>\n/news — Market news (Finnhub)\n/market — Market overview\n/fii — FII/DII data\n/global — Global markets\n/research [query]\n\n<b>🛠️ Tools</b>\n/code — Code agent\n/help — Commands\n\n<i>Or just chat! I can write code, build websites, plan businesses, answer anything.</i>")
+        send_telegram("📋 <b>Tej v3.1</b>\n\n<b>💰 Trading</b>\n/capital /pnl /status\n\n<b>📊 Live Data</b>\n/nifty — Index + movers\n/price SYMBOL — Full stock data\n/scan — Short screener\n\n<b>📰 News &amp; Research</b>\n/news — Market news (Finnhub)\n/market — Market overview\n/fii — FII/DII data\n/global — Global markets\n/research [query]\n\n<b>🛠️ Tools</b>\n/code — Code agent\n/help — Commands\n\n<i>Or just chat! I can write code, build websites, plan businesses, answer anything.</i>")
     elif tl=='/nifty': send_telegram("📊..."); threading.Thread(target=fetch_nifty,daemon=True).start()
     elif tl.startswith('/price'):
         sym = text[6:].strip().upper()
@@ -347,7 +365,7 @@ def poll_telegram():
         except Exception as e: logger.error(f"Poll: {e}"); time.sleep(5)
 
 def start():
-    send_telegram("🚀 <b>Tej v3.0 — Ultimate Free AI</b>\n\n🧠 4 AI Engines (Groq+Gemini+OpenRouter+HF)\n🔍 3 Search (Tavily+Google+DDG)\n📊 6 Data (TV+Yahoo+Finnhub+AV+NSE+Kite)\n\n/help for commands\nOr just chat with me!")
+    send_telegram("🚀 <b>Tej v3.1 — Ultimate Free AI</b>\n\n🧠 6 AI Engines (Groq+Gemini+OpenRouter+HF)\n🔍 3 Search (Tavily+Google+DDG)\n📊 6 Data (TV+Yahoo+Finnhub+AV+NSE+Kite)\n\n/help for commands\nOr just chat with me!")
     threading.Thread(target=morning_briefing,daemon=True).start()
     poll_telegram()
 
