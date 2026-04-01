@@ -317,6 +317,34 @@ def handle_code_command(text):
         from agents.code_agent import handle_code_command as _h; _h(text)
     except Exception as e: send_telegram(f"⚠️ {e}")
 
+
+# ── VOICE CHAT ───────────────────────────────────────────────
+def handle_voice_message(file_id):
+    try:
+        send_telegram("🎤 Processing voice...")
+        import subprocess, speech_recognition as sr, asyncio, edge_tts
+        os.makedirs("/tmp/tej_voice", exist_ok=True)
+        ogg_path, wav_path, mp3_path = "/tmp/tej_voice/in.ogg", "/tmp/tej_voice/in.wav", "/tmp/tej_voice/out.mp3"
+        file_info = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile", params={"file_id": file_id}).json()
+        fp = file_info["result"]["file_path"]
+        with open(ogg_path, "wb") as f: f.write(requests.get(f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{fp}").content)
+        subprocess.run(["ffmpeg", "-y", "-i", ogg_path, wav_path], capture_output=True, timeout=10)
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(wav_path) as source: audio = recognizer.record(source)
+        text = recognizer.recognize_google(audio)
+        send_telegram(f"🎤 You said: <i>{text}</i>")
+        reply = ai_think(text, system="You are Tej. Respond conversationally, concisely (under 150 words) since this will be spoken aloud.", max_tokens=300)
+        send_telegram(reply)
+        async def tts(): await edge_tts.Communicate(reply, "en-IN-PrabhatNeural").save(mp3_path)
+        asyncio.run(tts())
+        if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0:
+            with open(mp3_path, "rb") as af:
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVoice",
+                    data={"chat_id": TELEGRAM_CHAT_ID}, files={"voice": ("response.mp3", af, "audio/mpeg")}, timeout=30)
+    except Exception as e:
+        logger.error(f"Voice error: {e}")
+        send_telegram(f"🎤 Voice error: {e}")
+
 # ── COMMAND ROUTER ───────────────────────────────────────────
 def handle_command(text):
     text = text.strip(); tl = text.lower()
@@ -361,7 +389,12 @@ def poll_telegram():
             for u in resp.json().get("result",[]):
                 offset = u["update_id"]+1
                 m = u.get("message",{}); t = m.get("text","")
-                if t and str(m.get("chat",{}).get("id",""))==str(TELEGRAM_CHAT_ID): handle_command(t)
+                chat_id_str = str(m.get("chat",{}).get("id",""))
+                if chat_id_str == str(TELEGRAM_CHAT_ID):
+                    if t:
+                        handle_command(t)
+                    elif m.get("voice"):
+                        threading.Thread(target=handle_voice_message, args=(m["voice"]["file_id"],), daemon=True).start()
         except Exception as e: logger.error(f"Poll: {e}"); time.sleep(5)
 
 def start():
