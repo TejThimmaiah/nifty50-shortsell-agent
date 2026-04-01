@@ -296,7 +296,7 @@ def research_and_reply(query):
     if not results: send_telegram(f"⚠️ No results: {query}"); return
     ctx = "\n".join([r.get("body","") for r in results[:5]])
     src = "\n".join([f"• {r.get('href','')}" for r in results[:3]])
-    reply = ai_think(f"Summarise for Indian trader:\nQuery: {query}\n{ctx}", max_tokens=400)
+    reply = ai_think(f"Summarise for Indian trader:\nQuery: {query}\n{ctx}", max_tokens=1000)
     send_telegram(f"🔍 <b>{query}</b>\n\n{reply}\n\n<i>Sources:</i>\n{src}")
 
 def ai_respond(text):
@@ -309,7 +309,7 @@ def ai_respond(text):
     except: pass
     prompt = text + (f"\n\n[Search results]\n{search_ctx}" if search_ctx else "")
     system = "You are Tej, an elite AI developer and assistant with 6 AI engines. You write production-ready code with error handling, logging, and tests. You build SEO-optimized websites with meta tags, OG, sitemap, robots.txt. You plan businesses, analyze markets, create reports. Always give COMPLETE output, never snippets. NEVER claim to execute trades from chat."
-    reply = ai_think(prompt, system=system, max_tokens=600)
+    reply = ai_think(prompt, system=system, max_tokens=2000)
     send_telegram(reply)
 
 def handle_code_command(text):
