@@ -1,4 +1,5 @@
 import os, sys, time, logging, threading, requests, json
+import schedule as sched_lib
 from datetime import datetime
 import pytz
 from dotenv import load_dotenv
@@ -372,6 +373,107 @@ def handle_command(text):
     elif text.startswith('/'): send_telegram(f"❓ <code>{text}</code>\n/help for commands")
     else: threading.Thread(target=ai_respond,args=(text,),daemon=True).start()
 
+
+# ====== TRADING ENGINE (BrainOrchestrator on schedule) ======
+_brain_instance = None
+_brain_lock = threading.Lock()
+
+def _get_brain():
+    global _brain_instance
+    if _brain_instance is None:
+        with _brain_lock:
+            if _brain_instance is None:
+                try:
+                    logger.info("Initializing BrainOrchestrator for trading...")
+                    os.chdir(os.path.expanduser("~/nifty50-shortsell-agent"))
+                    from brain.orchestrator import BrainOrchestrator
+                    _brain_instance = BrainOrchestrator()
+                    logger.info("BrainOrchestrator initialized OK")
+                    send_telegram("\U0001f9e0 Trading brain initialized | Ready for live trading")
+                except Exception as e:
+                    logger.error(f"Failed to init BrainOrchestrator: {e}")
+                    send_telegram(f"\u274c Trading brain init failed: {e}")
+    return _brain_instance
+
+def _safe_run(method_name):
+    brain = _get_brain()
+    if brain is None:
+        logger.error(f"Cannot run {method_name} - brain not initialized")
+        return
+    try:
+        method = getattr(brain, method_name)
+        logger.info(f"[TRADE] Running {method_name}...")
+        method()
+        logger.info(f"[TRADE] {method_name} completed")
+    except Exception as e:
+        logger.error(f"[TRADE] {method_name} failed: {e}", exc_info=True)
+        send_telegram(f"\u26a0\ufe0f Trading {method_name} error: {e}")
+
+def _trade_is_market_day():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    if now.weekday() >= 5:
+        return False
+    try:
+        brain = _get_brain()
+        if brain and hasattr(brain, '_is_market_day'):
+            return brain._is_market_day()
+    except:
+        pass
+    return True
+
+def _safe_run_breaker_reset():
+    brain = _get_brain()
+    if brain and hasattr(brain, 'breaker'):
+        try:
+            brain.breaker.reset_daily()
+            logger.info("[TRADE] Circuit breaker reset")
+        except Exception as e:
+            logger.error(f"[TRADE] Breaker reset failed: {e}")
+
+def _safe_run_intraday():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    mins = now.hour * 60 + now.minute
+    if 9 * 60 + 20 <= mins <= 15 * 60 + 10:
+        _safe_run("_intraday_loop")
+
+def trading_scheduler():
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    IST = ZoneInfo("Asia/Kolkata")
+    logger.info("[TRADE] Trading scheduler thread started")
+    send_telegram("\U0001f4ca Trading scheduler started - will trade Mon-Fri 9:20 AM IST")
+    os.environ['TZ'] = 'Asia/Kolkata'
+    try:
+        time.tzset()
+    except:
+        pass
+    sched_lib.every().day.at("08:50").do(lambda: _safe_run("_pre_market_intel") if _trade_is_market_day() else None)
+    sched_lib.every().day.at("09:10").do(lambda: _safe_run_breaker_reset() if _trade_is_market_day() else None)
+    sched_lib.every().day.at("09:20").do(lambda: _safe_run("_morning_scan") if _trade_is_market_day() else None)
+    sched_lib.every(5).minutes.do(lambda: _safe_run_intraday() if _trade_is_market_day() else None)
+    sched_lib.every().day.at("15:10").do(lambda: _safe_run("_force_square_off") if _trade_is_market_day() else None)
+    sched_lib.every().day.at("15:35").do(lambda: _safe_run("_end_of_day") if _trade_is_market_day() else None)
+    sched_lib.every().sunday.at("20:00").do(lambda: _safe_run("_weekly_evolution"))
+    now_ist = datetime.now(IST)
+    mins = now_ist.hour * 60 + now_ist.minute
+    if _trade_is_market_day():
+        if mins >= 9 * 60 + 10:
+            _safe_run_breaker_reset()
+        if 9 * 60 + 20 <= mins < 13 * 60:
+            _safe_run("_morning_scan")
+    while True:
+        try:
+            sched_lib.run_pending()
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"[TRADE] Scheduler error: {e}", exc_info=True)
+            time.sleep(10)
+
+
 # ── MAIN ─────────────────────────────────────────────────────
 def morning_briefing():
     while True:
@@ -400,6 +502,7 @@ def poll_telegram():
 def start():
     send_telegram("🚀 <b>Tej v3.1 — Ultimate Free AI</b>\n\n🧠 6 AI Engines (Groq+Gemini+OpenRouter+HF)\n🔍 3 Search (Tavily+Google+DDG)\n📊 6 Data (TV+Yahoo+Finnhub+AV+NSE+Kite)\n\n/help for commands\nOr just chat with me!")
     threading.Thread(target=morning_briefing,daemon=True).start()
+    threading.Thread(target=trading_scheduler,daemon=True).start()
     poll_telegram()
 
 if __name__ == "__main__":
