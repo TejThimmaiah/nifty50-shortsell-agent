@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tej — 2026-04-10</title>
+<style>
+  :root {
+    --bg: #f8fafc; --surface: #fff; --border: #e2e8f0;
+    --text: #1e293b; --muted: #64748b;
+    --green: #16a34a; --red: #dc2626; --blue: #2563eb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: var(--bg); color: var(--text); padding: 2rem; }
+  .container { max-width: 900px; margin: 0 auto; }
+  header { margin-bottom: 2rem; }
+  header h1 { font-size: 1.5rem; font-weight: 700; }
+  header p  { color: var(--muted); margin-top: .25rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+             gap: 1rem; margin-bottom: 2rem; }
+  .card { background: var(--surface); border: 1px solid var(--border);
+           border-radius: 12px; padding: 1.25rem; }
+  .card-label { font-size: .75rem; color: var(--muted); text-transform: uppercase;
+                 letter-spacing: .05em; margin-bottom: .5rem; }
+  .card-value { font-size: 1.5rem; font-weight: 700; }
+  .green { color: var(--green); } .red { color: var(--red); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface);
+           border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  th { background: #f1f5f9; font-size: .75rem; text-transform: uppercase;
+        letter-spacing: .05em; color: var(--muted); padding: .75rem 1rem; text-align: left; }
+  td { padding: .75rem 1rem; border-top: 1px solid var(--border); font-size: .9rem; }
+  .badge { padding: .2rem .6rem; border-radius: 9999px; font-size: .7rem; font-weight: 600; }
+  .badge-short  { background: #fef2f2; color: #dc2626; }
+  .badge-open   { background: #eff6ff; color: #2563eb; }
+  .badge-closed { background: #f0fdf4; color: #16a34a; }
+  footer { margin-top: 2rem; color: var(--muted); font-size: .8rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Tej — Daily Report</h1>
+    <p>2026-04-10 · Generated 15:35 IST</p>
+  </header>
+
+  <div class="cards">
+    <div class="card">
+      <div class="card-label">Total P&L</div>
+      <div class="card-value" style="color:#16a34a">+₹0</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Trades</div>
+      <div class="card-value">0</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Win Rate</div>
+      <div class="card-value">0%</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Winners</div>
+      <div class="card-value green">0</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Losers</div>
+      <div class="card-value red">0</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Best Trade</div>
+      <div class="card-value">None</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th><th>Direction</th><th>Entry</th>
+        <th>Exit</th><th>Qty</th><th>P&L</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="7" style="text-align:center;color:#94a3b8">No trades today</td></tr>
+    </tbody>
+  </table>
+
+  <footer>Tej Autonomous Agent · Paper trade mode active</footer>
+</div>
+</body>
+</html>
